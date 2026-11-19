@@ -40,7 +40,7 @@ desktop/models/
 # ---- local developer documentation (never push to GitHub)
 MD/
 md/
-*.md
+!README.md
 
 # ---- diagnostics, screenshots & local agent tools
 chrome-*-profile*/
