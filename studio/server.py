@@ -36,7 +36,8 @@ def _quiet(fn):
 
 app = FastAPI(title="QlipIt Studio", docs_url=None, redoc_url=None, openapi_url=None)
 WEB = config.ROOT / "web"
-OPEN = ("/api/auth/", "/pub/", "/api/public", "/auth/google/", "/auth/verify", "/brand/", "/assets/", "/healthz", "/favicon.ico", "/robots.txt", "/sitemap.xml", "/manifest.json", "/api/voice/", "/api/speech-model")
+PUBLIC = config.ROOT / "public"
+OPEN = ("/api/auth/", "/pub/", "/api/public", "/auth/google/", "/auth/verify", "/brand/", "/public/", "/assets/", "/healthz", "/favicon.ico", "/robots.txt", "/sitemap.xml", "/manifest.json", "/api/voice/", "/api/speech-model")
 PAGES = {"/": "landing.html", "/login": "auth.html", "/signup": "auth.html", "/reset": "reset.html",
          "/privacy": "legal.html", "/terms": "legal.html", "/acceptable-use": "legal.html"}
 VIDEO_TYPES = {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".ts", ".flv"}
@@ -440,6 +441,26 @@ def manifest():
     if not f.is_file():
         raise HTTPException(404)
     return FileResponse(f, media_type="application/manifest+json", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/public/{name:path}")
+def public_file(name: str):
+    f = (PUBLIC / name).resolve()
+    if not str(f).startswith(str(PUBLIC.resolve())) or not f.is_file():
+        raise HTTPException(404)
+    media_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".webp": "image/webp",
+        ".mp4": "video/mp4",
+        ".json": "application/json",
+        ".css": "text/css",
+        ".js": "text/javascript",
+    }
+    return FileResponse(f, media_type=media_types.get(f.suffix.lower()), headers={"Cache-Control": "public, max-age=604800, stale-while-revalidate=86400"})
 
 
 # ================================================================ sign up, sign in, sign out

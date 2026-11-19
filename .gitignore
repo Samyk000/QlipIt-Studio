@@ -37,11 +37,18 @@ desktop/dist/
 desktop/ffmpeg/
 desktop/models/
 
+# ---- local developer documentation (never push to GitHub)
+MD/
+md/
+*.md
+
 # ---- diagnostics, screenshots & local agent tools
 chrome-*-profile*/
 chrome-test-profile/
 *.png
 !web/brand/*.png
+!public/*.png
+!public/**
 top_left_crop.png
 .agents/
 skills-lock.json
