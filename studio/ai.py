@@ -1,10 +1,10 @@
 """Talking to the AI service. You bring your own key, and choose the service and model in the dashboard
 (Settings, AI) or in .env. What is saved from the dashboard is kept in ai.json in the data folder and wins.
 
-    PEAKCUT_AI_PROVIDER   gemini | openai | xai | groq | openrouter | anthropic | ollama | custom
-    PEAKCUT_AI_MODELS     one or more model ids, comma separated, tried in this order
-    PEAKCUT_AI_KEY        your key (or PEAKCUT_AI_KEY_FILE, a file holding it)
-    PEAKCUT_AI_BASE_URL   only for "custom" (any service that speaks the OpenAI chat format), or to override
+    QLIPIT_AI_PROVIDER   gemini | openai | xai | groq | openrouter | anthropic | ollama | custom
+    QLIPIT_AI_MODELS     one or more model ids, comma separated, tried in this order
+    QLIPIT_AI_KEY        your key (or QLIPIT_AI_KEY_FILE, a file holding it)
+    QLIPIT_AI_BASE_URL   only for "custom" (any service that speaks the OpenAI chat format), or to override
 
 Every service is asked for the same thing: JSON that follows a small schema. Gemini takes the schema directly.
 The others are told the schema in the prompt and asked for a JSON object, which works with any chat model."""
@@ -251,7 +251,7 @@ def call(model: str, prompt: str, schema: dict):
     given up on after AI_SECONDS, so a video can never wait on it for ever."""
     how = PROVIDERS[provider()][2]
     ask = {"gemini": _gemini, "openai": _openai, "anthropic": _anthropic}[how]
-    box, secs = {}, float(config.env("PEAKCUT_AI_SECONDS", "300"))
+    box, secs = {}, float(config.env("QLIPIT_AI_SECONDS", "300"))
 
     def work():
         try:

@@ -135,7 +135,7 @@ def ensure(on_progress=None) -> None:
             state.update(stage="Ready", status=states.ModelStatus.READY)
         except Exception as e:  # noqa: BLE001
             state.update(error=str(e)[-200:], status=states.ModelStatus.ERROR)
-            raise RuntimeError("PeakCut couldn't download its speech model (about 480 MB, needed once). Check the "
+            raise RuntimeError("QlipIt Studio couldn't download its speech model (about 480 MB, needed once). Check the "
                                "internet connection and free disk space, then try again.") from e
         finally:
             state["doing"] = False

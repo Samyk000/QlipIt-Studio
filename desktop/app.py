@@ -1,11 +1,11 @@
-"""PeakCut as an ordinary Windows program: double-click it, the app opens; close the window, it stops.
+"""QlipIt Studio as an ordinary Windows program: double-click it, the app opens; close the window, it stops.
 
 There is nothing to install and no terminal to keep open. The first start makes its own folder under
-%LOCALAPPDATA%\\PeakCut (videos, clips, the database and the speech model), starts the PeakCut server on a free
+%LOCALAPPDATA%\\QlipIt (videos, clips, the database and the speech model), starts the QlipIt server on a free
 port, and shows it in a window of its own: Edge without tabs, an address bar or a Start menu of its own.
 
-    PeakCut.exe --selftest            check that everything the bundle needs is really there, then stop
-    PeakCut.exe --pick-folder FILE    show the computer's "choose a folder" window, write the answer to FILE
+    QlipIt.exe --selftest            check that everything the bundle needs is really there, then stop
+    QlipIt.exe --pick-folder FILE    show the computer's "choose a folder" window, write the answer to FILE
                                       (the settings page asks for it this way: a bundled app cannot run "python -c")
 """
 import json
@@ -24,15 +24,15 @@ if str(ROOT) not in sys.path:
 
 NAME = "QlipIt"
 LOCAL = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-HOME = LOCAL / ("PeakCut" if (LOCAL / "PeakCut" / "data").exists() else "QlipIt")                      # everything keeps: videos, clips, database, model, window profile
-LOG = HOME / "qlipit.log" if (HOME / "qlipit.log").exists() else HOME / "peakcut.log"
+HOME = LOCAL / ("QlipIt" if not (LOCAL / "PeakCut" / "data").exists() else "PeakCut")                      # everything keeps: videos, clips, database, model, window profile
+LOG = HOME / "qlipit.log"
 FIRST_PORT = int(os.environ.get("QLIPIT_PORT") or os.environ.get("PEAKCUT_PORT") or 8765)   # a second copy (for trying things) can be told another one
 WIDTH, HEIGHT = 1360, 900
 READY_SECONDS = 180                      # the speech library takes a while to load on a cold start
 
 
 def log(text: str):
-    """A line for peakcut.log. It is the only way to see what went wrong when no window opened."""
+    """A line for qlipit.log. It is the only way to see what went wrong when no window opened."""
     try:
         with LOG.open("a", encoding="utf-8") as f:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {text}\n")
@@ -50,7 +50,7 @@ def say(text: str):
 
 
 def up(port: int) -> bool:
-    """Is PeakCut already answering on this port?"""
+    """Is QlipIt already answering on this port?"""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1.5) as r:
             return r.status == 200 and b'"ok"' in r.read(200)
@@ -70,9 +70,9 @@ def free(port: int) -> bool:
 
 
 def seed_storage():
-    """Point PeakCut's folder at %LOCALAPPDATA%\\PeakCut\\data on the first start.
+    """Point QlipIt's folder at %LOCALAPPDATA%\\QlipIt\\data on the first start.
 
-    It has to be written down rather than passed as PEAKCUT_DATA: that setting wins over the settings page, and
+    It has to be written down rather than passed as QLIPIT_DATA: that setting wins over the settings page, and
     then "Storage, move my folder" would stop working. Written this way, everything works as it does from source."""
     f = HOME / "storage.json"
     if not f.exists():
@@ -84,19 +84,19 @@ _MUTEX = None
 
 
 def hold():
-    """One PeakCut at a time: a second double-click shows the copy that is already open, instead of starting a
+    """One QlipIt at a time: a second double-click shows the copy that is already open, instead of starting a
     second server on the same database. Windows releases the lock when the program ends, even after a crash, so
     nothing can be left stuck. Returns the open file (keep it open), or None when another copy has it."""
     global _MUTEX
     if sys.platform == "win32":
         try:
             import ctypes
-            # Named Win32 mutex so Inno Setup (AppMutex=PeakCutAppMutex) detects running instances on upgrade/re-install
-            _MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "PeakCutAppMutex")
+            # Named Win32 mutex so Inno Setup (AppMutex=QlipItAppMutex) detects running instances on upgrade/re-install
+            _MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "QlipItAppMutex")
         except Exception:
             pass
     import msvcrt
-    f = open(HOME / "peakcut.lock", "a+")
+    f = open(HOME / "qlipit.lock", "a+")
     try:
         msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
         return f
@@ -139,9 +139,7 @@ def ask_folder() -> str:
 def _find_ico() -> str:
     candidates = [
         Path(__file__).resolve().parent / "qlipit.ico",
-        Path(__file__).resolve().parent / "peakcut.ico",
         Path(sys.executable).resolve().parent / "_internal" / "desktop" / "qlipit.ico",
-        Path(sys.executable).resolve().parent / "_internal" / "desktop" / "peakcut.ico",
         Path(sys.executable).resolve().parent / "desktop" / "qlipit.ico",
         Path(sys.executable).resolve().parent / "_internal" / "web" / "brand" / "favicon.ico",
         Path(__file__).resolve().parent.parent / "web" / "brand" / "favicon.ico",
@@ -153,7 +151,7 @@ def _find_ico() -> str:
 
 
 def _set_window_aumid(hwnd: int, app_id: str, ico_path: str):
-    """Set System.AppUserModel.ID and Relaunch properties on the window so Windows Taskbar pins and groups it as PeakCut."""
+    """Set System.AppUserModel.ID and Relaunch properties on the window so Windows Taskbar pins and groups it as QlipIt."""
     import ctypes
     from ctypes import wintypes
     import uuid
@@ -226,7 +224,7 @@ def _set_window_aumid(hwnd: int, app_id: str, ico_path: str):
 
 
 def _decorate_window(stop_ev: threading.Event):
-    """Watches for the PeakCut window to appear, applies the native icon and sets taskbar grouping."""
+    """Watches for the QlipIt window to appear, applies the native icon and sets taskbar grouping."""
     if sys.platform != "win32":
         return
     import ctypes
@@ -259,7 +257,7 @@ def _decorate_window(stop_ev: threading.Event):
             cls = ctypes.create_unicode_buffer(512)
             user32.GetClassNameW(hwnd, cls, 512)
             if "Chrome_WidgetWin_1" in cls.value:
-                has_name = "qlipit" in title.value.lower() or "peakcut" in title.value.lower()
+                has_name = "qlipit" in title.value.lower()
                 if has_name:
                     found_named_window = True
                 if (has_name or not title.value) and hwnd not in decorated:
@@ -284,13 +282,13 @@ def _decorate_window(stop_ev: threading.Event):
 
 
 def show(url: str) -> int:
-    """Open PeakCut in a window of its own, and return when that window is closed.
+    """Open QlipIt in a window of its own, and return when that window is closed.
 
-    Edge is given its own profile folder under PeakCut's home, which is what makes one window one PeakCut: the
+    Edge is given its own profile folder under QlipIt's home, which is what makes one window one QlipIt: the
     process we start is the one that closes, so closing the window really is quitting."""
     exe = edge()
     if not exe:
-        # shortcut: without a browser of its own there is no window to wait for, so PeakCut keeps running until
+        # shortcut: without a browser of its own there is no window to wait for, so QlipIt keeps running until
         # it is ended from Task Manager; upgrade when Windows without Edge turns up.
         import webbrowser
         webbrowser.open(url)
@@ -332,8 +330,10 @@ def main() -> int:
         return 0
 
     # settings that must be in place before studio.config reads them
-    os.environ["PEAKCUT_STORAGE_FILE"] = str(HOME / "storage.json")
+    os.environ["QLIPIT_STORAGE_FILE"] = os.environ["PEAKCUT_STORAGE_FILE"] = str(HOME / "storage.json")
+    os.environ.setdefault("QLIPIT_UPDATE_CHECK", "0")
     os.environ.setdefault("PEAKCUT_UPDATE_CHECK", "0")     # a packaged copy cannot update itself from GitHub
+    os.environ.setdefault("QLIPIT_AUTO_RELOAD", "0")
     os.environ.setdefault("PEAKCUT_AUTO_RELOAD", "0")
     seed_storage()
 
@@ -355,21 +355,22 @@ def main() -> int:
                     log(f"already open on {p}: showing that one")
                     return show(f"http://127.0.0.1:{p}")
             time.sleep(0.5)
-        say("PeakCut is already open. Close it first, then start it again.")
+        say("QlipIt is already open. Close it first, then start it again.")
         return 0
 
     port = None
     for p in range(FIRST_PORT, FIRST_PORT + 20):
         if up(p):
-            log(f"PeakCut is already running on {p}: showing that one")
+            log(f"QlipIt is already running on {p}: showing that one")
             return show(f"http://127.0.0.1:{p}")
         if free(p):
             port = p
             break
     if port is None:
-        say("PeakCut could not find a free port to start on. Restart the computer and try again.")
+        say("QlipIt could not find a free port to start on. Restart the computer and try again.")
         return 1
-    os.environ["PEAKCUT_PORT"] = str(port)
+    os.environ["QLIPIT_PORT"] = os.environ["PEAKCUT_PORT"] = str(port)
+    os.environ.setdefault("QLIPIT_PUBLIC_URL", f"http://127.0.0.1:{port}")
     os.environ.setdefault("PEAKCUT_PUBLIC_URL", f"http://127.0.0.1:{port}")
     url = f"http://127.0.0.1:{port}"
 
@@ -384,7 +385,7 @@ def main() -> int:
         time.sleep(0.5)
     else:
         log("the server did not come up")
-        say("PeakCut could not start. The reason is in this file:\n\n" + str(LOG))
+        say("QlipIt could not start. The reason is in this file:\n\n" + str(LOG))
         return 1
 
     log(f"open on {url}")

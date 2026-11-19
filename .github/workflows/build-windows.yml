@@ -42,12 +42,12 @@ jobs:
       - name: Verify build with self-test
         shell: powershell
         run: |
-          Start-Process -FilePath "desktop\dist\PeakCut\PeakCut.exe" -ArgumentList "--selftest" -Wait -PassThru
+          Start-Process -FilePath "desktop\dist\QlipIt\QlipIt.exe" -ArgumentList "--selftest" -Wait -PassThru
 
       - name: Upload Installer Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PeakCut-Setup
+          name: QlipIt-Setup
           path: desktop/dist/installer/*.exe
           if-no-files-found: error
 

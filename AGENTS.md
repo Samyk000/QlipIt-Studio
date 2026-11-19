@@ -1,4 +1,4 @@
-# Working on PeakCut
+# Working on QlipIt Studio
 
 A short map for contributors and AI coding assistants.
 
@@ -9,9 +9,9 @@ A short map for contributors and AI coding assistants.
 - Tests: `python tests/run.py`. It starts a throwaway copy on a spare port with an empty data folder. Run it
   before and after any change to `studio/`. No keys needed.
 - To try a risky change by hand without touching real data:
-  `PEAKCUT_DATA=<temp folder> PEAKCUT_PORT=8766 python -m studio.server`.
+  `QLIPIT_DATA=<temp folder> QLIPIT_PORT=8766 python -m studio.server`.
 - Windows app: `powershell -ExecutionPolicy Bypass -File desktop\build.ps1` makes
-  `desktop\dist\PeakCut\` and the installer (needs `winget install JRSoftware.InnoSetup` once; `-SkipInstaller`
+  `desktop\dist\QlipIt\` and the installer (needs `winget install JRSoftware.InnoSetup` once; `-SkipInstaller`
   skips that half). The app itself needs nothing installed: ffmpeg and the pages travel inside it.
 
 ## Where things are
@@ -31,12 +31,12 @@ A short map for contributors and AI coding assistants.
 | `studio/auth.py`, `studio/account.py`, `studio/admin.py` | Sign-in, deleting things, the admin dashboard |
 | `studio/db.py` | Database tables (SQLAlchemy core; SQLite or PostgreSQL) |
 | `web/index.html` | The whole signed-in app, one file, no build step |
-| `desktop/` | The Windows app: `app.py` (starts the server, shows the window, stops it), `peakcut.spec` (PyInstaller), `peakcut.iss` (installer), `build.ps1` |
+| `desktop/` | The Windows app: `app.py` (starts the server, shows the window, stops it), `qlipit.spec` (PyInstaller), `qlipit.iss` (installer), `build.ps1` |
 
 ## Rules worth knowing
 
 - **Sign-in is off by default** (`config.ACCOUNTS`): every request then belongs to one built-in owner
-  (`auth.local_user()`). With `PEAKCUT_ACCOUNTS=1` it is a normal multi-user site. Both paths are tested.
+  (`auth.local_user()`). With `QLIPIT_ACCOUNTS=1` it is a normal multi-user site. Both paths are tested.
 - **Who is asking** always comes from the session (`ctx.uid()`), never from the request body. Background threads
   set it themselves with `ctx.as_user(...)`.
 - **Anything that changes what a user sees must call `ctx.bump()`**. The page polls `/api/sync`, which answers

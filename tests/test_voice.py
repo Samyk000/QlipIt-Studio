@@ -106,7 +106,7 @@ def test_voice_synthesis_and_word_timestamps():
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         out_path = Path(tmp.name)
     try:
-        script = "PeakCut brings your best gaming moments to life."
+        script = "QlipIt Studio brings your best gaming moments to life."
         words = voice.generate(script, "en-US-AndrewNeural", out_path)
         assert out_path.is_file()
         assert out_path.stat().st_size > 1000
@@ -142,7 +142,7 @@ def test_render_clip_with_voiceover():
             "enabled": True,
             "mode": "mute",
             "voice": "en-US-AndrewNeural",
-            "script": "Voiceover is now fully integrated into PeakCut.",
+            "script": "Voiceover is now fully integrated into QlipIt Studio.",
             "rate": "+0%"
         }
     }
@@ -156,7 +156,7 @@ def test_render_clip_with_voiceover():
 
     ass_text = (out_dir / "vo_clip_1.ass").read_text(encoding="utf-8")
     assert "VOICEOVER READY" in ass_text
-    assert "PEAKCUT" in ass_text.upper() or "VOICEOVER" in ass_text.upper()
+    assert "QLIPIT" in ass_text.upper() or "VOICEOVER" in ass_text.upper()
 
     # Clean up
     import shutil

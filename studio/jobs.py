@@ -441,7 +441,7 @@ def render_one(job, clip, words):
     save(job)
 
 
-CLIP_MINUTES = float(config.env("PEAKCUT_CLIP_MINUTES", "15"))     # the longest one clip may take to make
+CLIP_MINUTES = float(config.env("QLIPIT_CLIP_MINUTES", "15"))     # the longest one clip may take to make
 
 
 def _wait_for_clips(job, futures, began, workers):
@@ -653,7 +653,7 @@ def _run_job(job):
             render_one(job, clip, words_now)
 
     cpus = os.cpu_count() or 4
-    env_renders = config.penv("PEAKCUT_MAX_RENDERS")
+    env_renders = config.penv("QLIPIT_MAX_RENDERS")
     max_renders = int(env_renders) if env_renders else (1 if cpus < 6 else 2)
     renders = ThreadPoolExecutor(max(1, max_renders))  # capped on laptops to prevent thermal throttling and fan noise
     futures = []

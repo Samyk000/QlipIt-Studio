@@ -4,7 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File desktop\build.ps1 -SkipInstaller  app folder only
 #   powershell -ExecutionPolicy Bypass -File desktop\build.ps1 -BundleModel    pre-bundle speech model (offline installer)
 #
-# Ends with: desktop\dist\PeakCut\ (the app itself) and desktop\dist\installer\PeakCut-Setup-1.0.0.exe
+# Ends with: desktop\dist\QlipIt\ (the app itself) and desktop\dist\installer\QlipIt-Setup-1.0.0.exe
 param([switch]$SkipInstaller, [switch]$BundleModel)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -13,7 +13,7 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { $python = Join-Path $root "venv\Scripts\python.exe" }
 if (-not (Test-Path $python)) { $python = (Get-Command python -ErrorAction SilentlyContinue).Source }
 
-# ffmpeg: the two programs PeakCut runs, put inside the app so nothing has to be installed beforehand.
+# ffmpeg: the two programs QlipIt Studio runs, put inside the app so nothing has to be installed beforehand.
 $ffmpeg = Join-Path $PSScriptRoot "ffmpeg"
 if (-not (Test-Path (Join-Path $ffmpeg "ffmpeg.exe"))) {
     Write-Host "Getting ffmpeg (once, about 90 MB)..."
@@ -43,7 +43,7 @@ if ($BundleModel) {
 }
 
 Write-Host "Building the app folder..."
-& $python -m PyInstaller (Join-Path $PSScriptRoot "peakcut.spec") --noconfirm `
+& $python -m PyInstaller (Join-Path $PSScriptRoot "qlipit.spec") --noconfirm `
     --distpath (Join-Path $PSScriptRoot "dist") --workpath (Join-Path $PSScriptRoot "build")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed." }
 
@@ -59,6 +59,6 @@ if (-not $iscc) {
 }
 
 Write-Host "Building the installer..."
-& $iscc (Join-Path $PSScriptRoot "peakcut.iss")
+& $iscc (Join-Path $PSScriptRoot "qlipit.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
 Write-Host "Done: desktop\dist\installer\"

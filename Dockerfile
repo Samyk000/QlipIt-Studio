@@ -1,4 +1,4 @@
-# PeakCut: one image with the web server, the clip pipeline and ffmpeg.
+# QlipIt Studio: one image with the web server, the clip pipeline and ffmpeg.
 FROM python:3.11-slim
 
 RUN apt-get update \
@@ -13,7 +13,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY studio studio
 COPY web web
 
-ENV PEAKCUT_DATA=/data \
+ENV QLIPIT_DATA=/data \
+    QLIPIT_HOST=0.0.0.0 \
+    QLIPIT_PORT=8765 \
+    QLIPIT_TRUST_PROXY=1 \
+    PEAKCUT_DATA=/data \
     PEAKCUT_HOST=0.0.0.0 \
     PEAKCUT_PORT=8765 \
     PEAKCUT_TRUST_PROXY=1 \

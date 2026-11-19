@@ -23,7 +23,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-AppMutex=QlipItAppMutex,PeakCutAppMutex
+AppMutex=QlipItAppMutex
 CloseApplications=yes
 RestartApplications=no
 
@@ -58,6 +58,5 @@ begin
   if CurUninstallStep = usPostUninstall then
     if RegQueryDWordValue(HKCU, 'Software\QlipIt', 'DeleteData', Delete) and (Delete = 1) then begin
       DelTree(ExpandConstant('{localappdata}\QlipIt'), True, True, True);
-      DelTree(ExpandConstant('{localappdata}\PeakCut'), True, True, True);
     end;
 end;

@@ -1,6 +1,6 @@
 # Build QlipIt.exe and the folder it needs. Run from the project folder:
 #
-#   .venv\Scripts\python.exe -m PyInstaller desktop\peakcut.spec --noconfirm
+#   .venv\Scripts\python.exe -m PyInstaller desktop\qlipit.spec --noconfirm
 #
 # The result is desktop\dist\QlipIt\ : QlipIt.exe plus an _internal folder holding Python, the pages, ffmpeg
 # and the speech libraries. That whole folder is the app; desktop\build.ps1 also wraps it in an installer.
@@ -11,7 +11,7 @@ from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).parent                       # the project folder (this file lives in desktop\)
 FFMPEG = ROOT / "desktop" / "ffmpeg"               # ffmpeg.exe and ffprobe.exe, put there by desktop\build.ps1
-ICO = ROOT / "desktop" / "qlipit.ico" if (ROOT / "desktop" / "qlipit.ico").is_file() else ROOT / "desktop" / "peakcut.ico"
+ICO = ROOT / "desktop" / "qlipit.ico"
 
 datas = [
     (str(ROOT / "web"), "web"),                    # every page, script and logo (server.WEB = <app>\web)

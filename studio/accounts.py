@@ -69,8 +69,8 @@ def _write(name, data):
 # ------------------------------------------------------------------ the server's apps with each platform
 # name -> (what the platform calls the id, what it calls the secret, .env names for both)
 APPS = {"google": ("Client ID", "Client secret", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
-        "instagram": ("Instagram app ID", "Instagram app secret", "PEAKCUT_IG_APP_ID", "PEAKCUT_IG_APP_SECRET"),
-        "tiktok": ("Client key", "Client secret", "PEAKCUT_TIKTOK_CLIENT_KEY", "PEAKCUT_TIKTOK_CLIENT_SECRET")}
+        "instagram": ("Instagram app ID", "Instagram app secret", "QLIPIT_IG_APP_ID", "QLIPIT_IG_APP_SECRET"),
+        "tiktok": ("Client key", "Client secret", "QLIPIT_TIKTOK_CLIENT_KEY", "QLIPIT_TIKTOK_CLIENT_SECRET")}
 APP_FOR = {"youtube": "google", "instagram": "instagram", "tiktok": "tiktok"}
 _apps_seen = {"at": None, "data": {}}
 
@@ -518,7 +518,7 @@ def _tiktok_creator(acc) -> dict:
     return _tt_post(acc, "/post/publish/creator_info/query/", {}, "Reading the TikTok account")
 
 
-# PeakCut's visibility setting -> what TikTok calls it, best first
+# QlipIt Studio's visibility setting -> what TikTok calls it, best first
 TT_PRIVACY = {"public": ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "MUTUAL_FOLLOW_FRIENDS"],
               "unlisted": ["MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR"], "private": ["SELF_ONLY"]}
 
