@@ -22,13 +22,56 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-NAME = "QlipIt"
+NAME = "QlipIt Studio"
 LOCAL = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-HOME = LOCAL / ("QlipIt" if not (LOCAL / "PeakCut" / "data").exists() else "PeakCut")                      # everything keeps: videos, clips, database, model, window profile
+HOME = LOCAL / "QlipIt"
 LOG = HOME / "qlipit.log"
-FIRST_PORT = int(os.environ.get("QLIPIT_PORT") or os.environ.get("PEAKCUT_PORT") or 8765)   # a second copy (for trying things) can be told another one
+FIRST_PORT = int(os.environ.get("QLIPIT_PORT") or os.environ.get("PEAKCUT_PORT") or 8765)
 WIDTH, HEIGHT = 1360, 900
-READY_SECONDS = 180                      # the speech library takes a while to load on a cold start
+READY_SECONDS = 180
+
+
+def _migrate_legacy_data():
+    r"""Silently migrate any existing data from legacy PeakCut folder into %LOCALAPPDATA%\QlipIt and remove legacy remnants."""
+    old_dir = LOCAL / "PeakCut"
+    if not old_dir.exists():
+        return
+    try:
+        HOME.mkdir(parents=True, exist_ok=True)
+        old_data = old_dir / "data"
+        new_data = HOME / "data"
+        if old_data.exists() and not new_data.exists():
+            shutil.copytree(str(old_data), str(new_data), dirs_exist_ok=True)
+        old_storage = old_dir / "storage.json"
+        new_storage = HOME / "storage.json"
+        if old_storage.exists() and not new_storage.exists():
+            shutil.copy2(str(old_storage), str(new_storage))
+        shutil.rmtree(str(old_dir), ignore_errors=True)
+    except Exception as e:
+        log(f"migration warning: {e!r}")
+
+
+def _clean_stale_edge_cache():
+    """Removes stale Chromium favicon and app caches so Edge fetches fresh QlipIt Studio brand icons."""
+    default_dir = HOME / "window" / "Default"
+    if not default_dir.exists():
+        return
+    stale_items = [
+        "Favicons",
+        "Favicons-journal",
+        "HubApps Icons",
+        "HubApps Icons-journal",
+        "Web Applications",
+    ]
+    for item in stale_items:
+        target = default_dir / item
+        try:
+            if target.is_dir():
+                shutil.rmtree(str(target), ignore_errors=True)
+            elif target.is_file():
+                target.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def log(text: str):
@@ -223,8 +266,30 @@ def _set_window_aumid(hwnd: int, app_id: str, ico_path: str):
     release(ppv)
 
 
-def _decorate_window(stop_ev: threading.Event):
-    """Watches for the QlipIt window to appear, applies the native icon and sets taskbar grouping."""
+def _apply_dark_title_bar(hwnd: int):
+    """Apply modern dark mode styling to the Windows title bar."""
+    import ctypes
+    try:
+        dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+        c_true = ctypes.c_int(1)
+        # DWMWA_USE_IMMERSIVE_DARK_MODE (20 on Win10 build 18985+ and Win11; 19 on older Win10)
+        dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(c_true), ctypes.sizeof(c_true))
+        dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(c_true), ctypes.sizeof(c_true))
+        # DWMWA_CAPTION_COLOR = 35: Background color for caption bar (#0B0D13 -> 0x00130D0B in COLORREF format)
+        caption_color = ctypes.c_int(0x00130D0B)
+        dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+        # DWMWA_TEXT_COLOR = 36: Caption title text color (#E4E0DA -> 0x00DAE0E4)
+        text_color = ctypes.c_int(0x00DAE0E4)
+        dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text_color), ctypes.sizeof(text_color))
+        # DWMWA_BORDER_COLOR = 34: Thin modern dark border (#1E2333 -> 0x0033231E)
+        border_color = ctypes.c_int(0x0033231E)
+        dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
+    except Exception as e:
+        log(f"dark title bar error: {e!r}")
+
+
+def _decorate_window(stop_ev: threading.Event, target_pid: int = 0):
+    """Watches for the QlipIt window to appear, applies native icon, title bar styling, and taskbar grouping instantly."""
     if sys.platform != "win32":
         return
     import ctypes
@@ -243,42 +308,70 @@ def _decorate_window(stop_ev: threading.Event):
 
     decorated = set()
     found_named_window = False
-    for _ in range(40):
+
+    # Poll rapidly (15ms) for the first 120 cycles (1.8s) so decoration occurs before or on first paint
+    for cycle in range(160):
         if stop_ev.is_set():
             break
+
         def cb(hwnd, _):
             nonlocal found_named_window
-            if not user32.IsWindowVisible(hwnd):
+            if user32.GetWindow(hwnd, 4) != 0:  # GW_OWNER != 0 (skip popup/child frames)
                 return True
-            if user32.GetWindow(hwnd, 4) != 0:
-                return True
-            title = ctypes.create_unicode_buffer(512)
-            user32.GetWindowTextW(hwnd, title, 512)
             cls = ctypes.create_unicode_buffer(512)
             user32.GetClassNameW(hwnd, cls, 512)
-            if "Chrome_WidgetWin_1" in cls.value:
-                has_name = "qlipit" in title.value.lower()
-                if has_name:
-                    found_named_window = True
-                if (has_name or not title.value) and hwnd not in decorated:
-                    try:
-                        if hicon_big:
-                            user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
-                        if hicon_small:
-                            user32.SendMessageW(hwnd, 0x0080, 0, hicon_small)
-                        _set_window_aumid(hwnd, "QlipIt.Studio", ico)
-                        decorated.add(hwnd)
-                        log(f"decorated window {hwnd} (title: '{title.value}')")
-                    except Exception as e:
-                        log(f"decorate window error: {e!r}")
+            if "Chrome_WidgetWin_1" not in cls.value:
+                return True
+
+            title = ctypes.create_unicode_buffer(512)
+            user32.GetWindowTextW(hwnd, title, 512)
+            t_lower = title.value.lower()
+
+            if target_pid:
+                wpid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+                is_our_pid = (wpid.value == target_pid)
+                is_our_title = "qlipit" in t_lower
+                if not (is_our_pid or is_our_title):
+                    return True
+            else:
+                if "qlipit" not in t_lower and title.value:
+                    return True
+
+            if "qlipit" in t_lower:
+                found_named_window = True
+
+            if hwnd not in decorated:
+                try:
+                    if hicon_big:
+                        user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
+                    if hicon_small:
+                        user32.SendMessageW(hwnd, 0x0080, 0, hicon_small)
+                    _set_window_aumid(hwnd, "QlipIt.Studio", ico)
+                    _apply_dark_title_bar(hwnd)
+                    user32.SetWindowTextW(hwnd, "QlipIt Studio")
+                    decorated.add(hwnd)
+                    log(f"decorated window {hwnd} (title: '{title.value}')")
+                except Exception as e:
+                    log(f"decorate window error: {e!r}")
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         user32.EnumWindows(WNDENUMPROC(cb), 0)
-        if found_named_window:
-            time.sleep(1.0)
+        if found_named_window and len(decorated) > 0:
+            time.sleep(0.2)
+            for hwnd in list(decorated):
+                try:
+                    if hicon_big:
+                        user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
+                    if hicon_small:
+                        user32.SendMessageW(hwnd, 0x0080, 0, hicon_small)
+                    _set_window_aumid(hwnd, "QlipIt.Studio", ico)
+                    _apply_dark_title_bar(hwnd)
+                except Exception:
+                    pass
             break
-        time.sleep(0.5)
+        time.sleep(0.015 if cycle < 100 else 0.05)
 
 
 def show(url: str) -> int:
@@ -295,16 +388,25 @@ def show(url: str) -> int:
         log(f"no Edge found: opened {url} in the default browser")
         threading.Event().wait()
         return 0
-    stop_ev = threading.Event()
-    th = threading.Thread(target=_decorate_window, args=(stop_ev,), daemon=True)
-    th.start()
+
+    _clean_stale_edge_cache()
     flags = [
-        str(exe), f"--app={url}", f"--user-data-dir={HOME / 'window'}",
-        f"--window-size={WIDTH},{HEIGHT}", "--window-name=QlipIt",
-        "--class=QlipIt.Studio", "--app-id=QlipIt",
-        "--no-first-run", "--no-default-browser-check"
+        str(exe),
+        f"--app={url}",
+        f"--user-data-dir={HOME / 'window'}",
+        f"--window-size={WIDTH},{HEIGHT}",
+        "--window-name=QlipIt Studio",
+        "--class=QlipIt.Studio",
+        "--app-id=QlipIt.Studio",
+        "--force-dark-mode",
+        "--enable-features=DarkLightMode",
+        "--no-first-run",
+        "--no-default-browser-check",
     ]
     p = subprocess.Popen(flags, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    stop_ev = threading.Event()
+    th = threading.Thread(target=_decorate_window, args=(stop_ev, p.pid), daemon=True)
+    th.start()
     try:
         p.wait()
     finally:
@@ -318,6 +420,7 @@ def main() -> int:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QlipIt.Studio")
     except Exception:
         pass
+    _migrate_legacy_data()
     HOME.mkdir(parents=True, exist_ok=True)
     if LOG.exists() and LOG.stat().st_size > 2_000_000:
         LOG.unlink()

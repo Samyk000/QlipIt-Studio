@@ -15,6 +15,7 @@ ICO = ROOT / "desktop" / "qlipit.ico"
 
 datas = [
     (str(ROOT / "web"), "web"),                    # every page, script and logo (server.WEB = <app>\web)
+    (str(ROOT / "public"), "public"),              # public static brand assets (/public/app-icon.png, etc.)
     (str(ROOT / "studio" / "fonts"), "studio/fonts"),   # the caption fonts, copied into the data folder
     (str(FFMPEG), "ffmpeg/bin"),                   # studio/tools.py looks in <app>\ffmpeg\bin before anywhere else
     (str(ICO), "desktop"),                         # application icon for window decoration
