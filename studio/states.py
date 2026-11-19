@@ -120,24 +120,6 @@ class LiveSessionStatus(StrEnum):
     ERROR = "error"
 
 
-# ---------------------------------------------------------------- Social Post States
-class PostStatus(StrEnum):
-    SCHEDULED = "scheduled"
-    POSTING = "posting"
-    POSTED = "posted"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-POST_TRANSITIONS: dict[str, set[str]] = {
-    PostStatus.SCHEDULED: {PostStatus.POSTING, PostStatus.CANCELLED},
-    PostStatus.POSTING: {PostStatus.POSTED, PostStatus.FAILED},
-    PostStatus.POSTED: set(),
-    PostStatus.FAILED: {PostStatus.SCHEDULED},  # Retry
-    PostStatus.CANCELLED: set(),
-}
-
-
 # ---------------------------------------------------------------- Transition Helpers
 def validate_transition(entity: str, current: str, target: str, allowed_map: dict[str, set[str]]) -> None:
     """Validate that transition from current to target is permitted."""

@@ -18,16 +18,41 @@ PORT = int(os.environ.get("PEAKCUT_TEST_PORT", "8799"))
 BASE = f"http://127.0.0.1:{PORT}"
 
 
+def _isolated_env(data: Path, port: int, base=None) -> dict:
+    """A test environment with no inherited app settings and no project .env loading."""
+    source = os.environ if base is None else base
+    env = {k: v for k, v in source.items() if not k.startswith(("QLIPIT_", "PEAKCUT_"))}
+    env.update({
+        "QLIPIT_LOAD_DOTENV": "0",
+        "PEAKCUT_DATA": str(data),
+        "PEAKCUT_PORT": str(port),
+        "PEAKCUT_PUBLIC_URL": f"http://127.0.0.1:{port}",
+        "PEAKCUT_HOST": "127.0.0.1",
+        "PEAKCUT_AUTO_RELOAD": "0",
+        "DATABASE_URL": "",
+        "PEAKCUT_ACCOUNTS": "1",
+        "PEAKCUT_FETCH_MODEL": "0",
+        "PEAKCUT_UPDATE_CHECK": "0",
+        "PEAKCUT_SMTP_HOST": "",
+        "PEAKCUT_VERIFY_EMAIL": "1",
+        "GOOGLE_CLIENT_ID": "",
+        "GOOGLE_CLIENT_SECRET": "",
+        "GOOGLE_CLIENT_FILE": "",
+        "PYTHONUNBUFFERED": "1",
+        "PEAKCUT_AI_KEY": "",
+        "PEAKCUT_AI_KEY_FILE": "",
+        "PEAKCUT_AI_MODELS": "",
+        "PEAKCUT_UPLOAD_PART_MB": "5",
+        "PEAKCUT_MAX_UPLOAD_MB": "64",
+    })
+    return env
+
+
 def main() -> int:
     data = Path(tempfile.mkdtemp(prefix="peakcut-test-"))
-    env = {**os.environ, "PEAKCUT_DATA": str(data), "PEAKCUT_PORT": str(PORT), "PEAKCUT_PUBLIC_URL": BASE,
-           "PEAKCUT_HOST": "127.0.0.1", "PEAKCUT_AUTO_RELOAD": "0", "DATABASE_URL": "",
-           "PEAKCUT_ACCOUNTS": "1", "PEAKCUT_FETCH_MODEL": "0", "PEAKCUT_UPDATE_CHECK": "0",                   # these tests are about people signing in; tests/test_local.py covers the default
-           # nothing outside this machine is contacted: no AI, no email, no Google sign-in
-           "PEAKCUT_SMTP_HOST": "", "PEAKCUT_VERIFY_EMAIL": "1",   # the tests cover the confirm-your-email rule
-           "GOOGLE_CLIENT_ID": "", "GOOGLE_CLIENT_SECRET": "", "GOOGLE_CLIENT_FILE": "", "PYTHONUNBUFFERED": "1",
-           "PEAKCUT_AI_KEY": "", "PEAKCUT_AI_KEY_FILE": "", "PEAKCUT_AI_MODELS": "",
-           "PEAKCUT_UPLOAD_PART_MB": "5", "PEAKCUT_MAX_UPLOAD_MB": "64"}
+    # These tests are about people signing in; tests/test_local.py covers the default. Nothing outside this
+    # machine is contacted: no AI, email, Google sign-in, updates or model downloads.
+    env = _isolated_env(data, PORT)
     log = data / "server.log"
     failed = []
     with log.open("w", encoding="utf-8") as out:
@@ -53,7 +78,7 @@ def main() -> int:
                 ("AI services", ["tests/test_ai.py"]),
                 ("no sign-in, and the AI key from the dashboard", ["tests/test_local.py"]),
                 ("Hindi and Urdu captions in Roman letters", ["tests/test_roman.py"]),
-                ("connecting YouTube, Instagram and TikTok", ["tests/test_connect.py"]),
+                ("one-time authentication links", ["tests/test_auth_tokens.py"]),
                 ("the new-version notice", ["tests/test_updates.py"]),
                 ("no limits by default", ["tests/test_limits.py"]),
                 ("captions never overlap, stuck clips, sentence endings", ["tests/test_stuck.py"]),

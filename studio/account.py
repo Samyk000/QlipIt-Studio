@@ -32,11 +32,11 @@ def delete_clip(jid: str, cid: str) -> bool:
     job["clips"] = [c for c in job["clips"] if c["id"] != cid]
     jobs.save(job)
     d = Path(job["dir"])
-    for name in (clip.get("file"), clip.get("cover")):
+    for name in (clip.get("file"), clip.get("cover"), f"{cid}.ass"):
         if name:
             (d / "clips" / Path(str(name)).name).unlink(missing_ok=True)
     src = clip.get("src")
-    if src and Path(src).parent == d:              # the piece of video fetched just for this clip
+    if src and Path(src).is_relative_to(d):        # the piece of video fetched for this clip (root or clips/)
         Path(src).unlink(missing_ok=True)
     ctx.bump()
     return True
@@ -123,8 +123,8 @@ def delete_creator(cid: str) -> dict:
 
 # ---------------------------------------------------------------- the whole account
 def delete_account(uid: str) -> dict:
-    """Remove an account and everything it owns: recordings, videos, clips, creators, connected accounts and
-    history. Sign-in is removed too."""
+    """Remove an account and everything it owns: recordings, videos, clips, creators and history.
+    Sign-in is removed too."""
     u = auth.get_user(uid)
     if not u:
         return {"ok": False}

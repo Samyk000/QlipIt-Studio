@@ -72,6 +72,17 @@ check("anything else is not guessed at", ai.explain("something odd"), "")
 ai.note_problem("HTTP 404 model not found")
 check("the reason is kept for the dashboard, and cleared when the AI answers again", (bool(ai.problem["text"]), (ai.clear_problem(), ai.problem["text"])[1]), (True, ""))
 
+# ---- the suite itself never inherits a real QlipIt configuration
+from tests import run as suite
+poison = {"QLIPIT_DATA": "real-library", "PEAKCUT_DATA": "other-library", "QLIPIT_AI_KEY": "real-key"}
+isolated = Path(tempfile.mkdtemp(prefix="pc-runner-"))
+test_env = suite._isolated_env(isolated, 8989, base=poison)
+check("the test runner removes inherited QlipIt and PeakCut settings",
+      (test_env.get("QLIPIT_DATA"), test_env["PEAKCUT_DATA"], test_env.get("QLIPIT_AI_KEY")),
+      (None, str(isolated), None))
+check("the test runner prevents .env from restoring real settings", test_env.get("QLIPIT_LOAD_DOTENV"), "0")
+shutil.rmtree(isolated, ignore_errors=True)
+
 print("ALL PASSED" if not fails else f"{len(fails)} failed")
 shutil.rmtree(os.environ["PEAKCUT_DATA"], ignore_errors=True); shutil.rmtree(hidden, ignore_errors=True)
 sys.exit(1 if fails else 0)

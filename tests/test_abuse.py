@@ -1,5 +1,6 @@
 """Abuse and limit tests against a throwaway PeakCut server. Usage: test_abuse.py <base url> <project root>"""
 import sys
+from pathlib import Path
 
 import httpx
 
@@ -36,13 +37,31 @@ check("normal login still works", anon.post("/api/auth/login", json={"email": "z
 
 # ---- the page's cheap check
 s1 = c.get("/api/sync").json()
-check("first sync sends everything", sorted(s1), ["accounts", "ai", "creators", "jobs", "unread", "v"])
+check("first sync sends everything", sorted(s1), ["ai", "creators", "jobs", "unread", "v"])
 s2 = c.get("/api/sync", params={"v": s1["v"]}).json()
 check("second sync says nothing changed", s2, {"v": s1["v"]})
-c.post("/api/creators", json={"name": "Sync Test"}, headers=ORIGIN)
+c.post("/api/creators", json={"name": "Sync Test", "autopost": True, "accounts": ["old-social-account"],
+                              "post_min_score": 50, "daily_cap": 20}, headers=ORIGIN)
 s3 = c.get("/api/sync", params={"v": s1["v"]}).json()
 check("sync notices a new creator", [x["name"] for x in s3.get("creators", [])], ["Sync Test"])
+check("removed posting fields are not accepted or returned for creators",
+      set(s3["creators"][0]).isdisjoint({"autopost", "accounts", "post_min_score", "post_gap_min", "daily_cap", "privacy", "post_footer", "rate_per_1k"}), True)
 check("sync needs a session", anon.__class__(base_url=BASE).get("/api/sync").status_code, 401)
+
+# ---- social account connections and direct publishing were deliberately removed
+status = c.get("/api/status").json()
+check("status has no social connection setup", set(status).isdisjoint({"connect", "youtube"}), True)
+check("connected-account endpoints no longer exist", (c.get("/api/accounts").status_code, c.get("/oauth/youtube/start").status_code), (404, 404))
+settings = c.put("/api/settings", json={"paused": True}, headers=ORIGIN).json()
+check("the old posting pause setting is ignored", "paused" in settings, False)
+overview = c.get("/api/overview").json()
+check("home overview contains clipping metrics only", (set(overview), set(overview["creators"][0])),
+      ({"creators", "daily", "alerts", "recording"}, {"id", "name", "state", "clips_today", "clips_total"}))
+app_html = (Path(sys.argv[2]) / "web" / "index.html").read_text(encoding="utf-8")
+landing_html = (Path(sys.argv[2]) / "web" / "landing.html").read_text(encoding="utf-8")
+check("the app no longer links social connection or publishing APIs",
+      all(x not in app_html for x in ("/api/accounts", "/api/apps", "/api/posts", "/oauth/", "Connected apps", "Post Queue")), True)
+check("the home page no longer promises direct publishing", "Posts straight to" in landing_html or "queue it to post" in landing_html, False)
 
 # ---- unverified account: no AI work, no uploads accepted
 check("unverified cannot start a job", c.post("/api/jobs", json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}, headers=ORIGIN).status_code, 403)

@@ -1,7 +1,6 @@
 """In-app notifications: the bell in the sidebar.
 
-Things worth knowing about without watching the screen: recordings starting, finishing or failing, clips
-ready, posts that failed."""
+Things worth knowing about without watching the screen: recordings starting, finishing or failing, and clips ready."""
 import time
 
 import sqlalchemy as sa

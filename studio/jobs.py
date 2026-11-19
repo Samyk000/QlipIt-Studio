@@ -4,6 +4,7 @@ import json
 import os
 import math
 import queue
+import re
 import shutil
 import threading
 import time
@@ -105,13 +106,19 @@ _live_q: "queue.Queue" = queue.Queue()   # live clips never wait behind a long v
 _jobs: dict = {}
 _by_user: dict = {}                       # user -> {job id: job}: listing one person's videos never scans everyone's
 _lock = threading.RLock()
-on_clip_ready: list = []   # callbacks (job, clip), run once when a clip first finishes
 
 DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "quality": 720,
             "range_start": None, "range_end": None}
 
 
 LIMITS = {"max_clips": (1, 20), "min_len": (5, 120), "max_len": (10, 180), "quality": (360, 1080)}
+
+
+def _next_clip_id(job) -> str:
+    """The next free id, by the highest one ever used, not by how many clips are left. A clip deleted while the
+    video is still being cut must not have its id (and so its files) reused by the next clip."""
+    used = [int(c["id"][4:]) for c in job["clips"] if re.fullmatch(r"clip\d+", str(c.get("id", "")))]
+    return f"clip{max(used, default=0) + 1:02d}"
 
 
 def clean_options(options) -> dict:
@@ -148,7 +155,7 @@ def public(job) -> dict:
     """What the browser may see: no server paths, no owner id."""
     out = {k: v for k, v in job.items() if k not in HIDDEN}
     out["source"] = {k: v for k, v in job["source"].items() if k != "path"}
-    out["clips"] = [{k: v for k, v in c.items() if k not in ("src", "fixed_words", "fixed_for")} for c in job["clips"]]
+    out["clips"] = [{k: v for k, v in c.items() if k not in ("src", "fixed_words", "fixed_for", "posts")} for c in job["clips"]]
     ai = job.get("ai") or {}
     out["ai"] = {"tokens": ai.get("tokens", 0), "note": ai.get("note", ""), "used": bool(ai.get("model"))}   # never the model, never raw errors
     if job.get("status") == "queued":
@@ -212,6 +219,7 @@ def _load_file(f: Path, uid: str):
         job.update(status=states.JobStatus.DONE, stage="Recording paused by a server update", was_live=True)
     buffered = job.get("kind") == "live" and any((f.parent / "buffer").glob("*.ts"))
     for c in job.get("clips", []):
+        c.pop("posts", None)
         if c.get("src"):
             c["src"] = _remap(c["src"], f.parent / "clips")
         if c.get("status") in (states.ClipStatus.RENDERING, states.ClipStatus.QUEUED):
@@ -429,11 +437,6 @@ def render_one(job, clip, words):
             clip.setdefault("made_at", time.time())
             creators.log(job["creator"], f"Clip ready (score {clip['score']}): {clip['title'] or clip['hook']}")
             save(job)
-            for fn in on_clip_ready:
-                try:
-                    fn(job, clip)
-                except Exception:  # noqa: BLE001
-                    traceback.print_exc()
     except Exception as e:  # noqa: BLE001
         states.transition_clip_status(clip, states.ClipStatus.ERROR)
         clip.update(error=safe.friendly(e, 400))
@@ -736,7 +739,7 @@ def _run_job(job):
         if ai.get("note"):
             notes.append(ai["note"])
         for c in found:
-            c.update(id=f"clip{len(job['clips']) + 1:02d}", start=round(c["start"] + shift, 2),
+            c.update(id=_next_clip_id(job), start=round(c["start"] + shift, 2),
                      end=round(c["end"] + shift, 2), style=o["style"], layout=o["layout"], status="queued", version=0)
             job["clips"].append(c)
             futures.append((renders.submit(ctx.bind(make), c, list(words)), c))

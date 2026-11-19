@@ -1,8 +1,11 @@
 """Big files sent in pieces: they arrive whole, and nobody can misuse the pieces address.
 Usage: test_upload_parts.py <base url of a running test server>"""
+import asyncio
 import hashlib
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -34,7 +37,8 @@ from studio import db                          # noqa: E402
 
 db.init()
 with db.engine.begin() as cn:
-    for (uid,) in cn.execute(sa.select(db.users.c.id).where(db.users.c.email.like("pieces-%"))).all():
+    users = dict(cn.execute(sa.select(db.users.c.email, db.users.c.id).where(db.users.c.email.like("pieces-%"))).all())
+    for uid in users.values():
         cn.execute(db.email_ok.insert().values(user_id=uid, verified_at=time.time()))
 st = a.get("/api/status").json()
 part_mb = st["upload_part_mb"]
@@ -74,6 +78,38 @@ big = a.put(f"/api/upload/{'0' * 24}/0", content=b"x" * ((part_mb + 9) * 1024 * 
 check("an oversized request to the pieces address is cut off", big.status_code == 413, str(big.status_code))
 c = a.post("/api/upload/start", json={"name": "y.mp4", "size": 1000}).json()
 check("an upload can be cancelled", a.delete(f"/api/upload/{c['id']}").status_code == 200 and a.put(f"/api/upload/{c['id']}/0", content=b"x" * 1000, headers=H).status_code == 404)
+
+# A piece may arrive while another worker is assembling that upload. Waiting for its lock must not freeze the
+# event loop (and therefore every unrelated request handled by that worker).
+waiting = a.post("/api/upload/start", json={"name": "waiting.mp4", "size": 1000}).json()
+from studio import ctx, server  # noqa: E402
+class OnePiece:
+    async def stream(self):
+        yield b"z" * 1000
+lock = server._up_lock_for(waiting["id"])
+lock.acquire()
+loop_responded = threading.Event()
+def release_after_probe():
+    loop_responded.wait(0.8)
+    lock.release()
+release = threading.Thread(target=release_after_probe)
+release.start()
+async def lock_wait_time():
+    token = ctx._uid.set(users["pieces-a@example.com"])
+    try:
+        started = time.perf_counter()
+        task = asyncio.create_task(server.upload_part(OnePiece(), waiting["id"], 0))
+        await asyncio.sleep(0.05)
+        responsive_after = time.perf_counter() - started
+        loop_responded.set()
+        await task
+        return responsive_after
+    finally:
+        ctx._uid.reset(token)
+elapsed = asyncio.run(lock_wait_time())
+release.join()
+check("waiting for an upload lock does not block the event loop", elapsed < 0.4, f"event loop paused for {elapsed:.3f}s")
+check("the directly tested upload can be cancelled", a.delete(f"/api/upload/{waiting['id']}").status_code == 200)
 
 print("\n%d failed" % len(fails) if fails else "\nALL PASSED")
 sys.exit(1 if fails else 0)

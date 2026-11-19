@@ -42,7 +42,8 @@ jobs:
       - name: Verify build with self-test
         shell: powershell
         run: |
-          Start-Process -FilePath "desktop\dist\QlipIt\QlipIt.exe" -ArgumentList "--selftest" -Wait -PassThru
+          $p = Start-Process -FilePath "desktop\dist\QlipIt\QlipIt.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
 
       - name: Upload Installer Artifact
         uses: actions/upload-artifact@v4

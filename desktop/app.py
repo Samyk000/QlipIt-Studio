@@ -10,6 +10,7 @@ port, and shows it in a window of its own: Edge without tabs, an address bar or 
 """
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -32,7 +33,10 @@ READY_SECONDS = 180
 
 
 def _migrate_legacy_data():
-    r"""Silently migrate any existing data from legacy PeakCut folder into %LOCALAPPDATA%\QlipIt and remove legacy remnants."""
+    r"""Move any PeakCut library into %LOCALAPPDATA%\QlipIt once, then remove the old folder.
+
+    The old folder is only removed after the copy has gone through: a full disk or a file in use must never cost
+    the only copy. The old settings file goes with it, so this runs again next start if anything was left behind."""
     old_dir = LOCAL / "PeakCut"
     if not old_dir.exists():
         return
@@ -40,13 +44,35 @@ def _migrate_legacy_data():
         HOME.mkdir(parents=True, exist_ok=True)
         old_data = old_dir / "data"
         new_data = HOME / "data"
-        if old_data.exists() and not new_data.exists():
-            shutil.copytree(str(old_data), str(new_data), dirs_exist_ok=True)
+        clean = True
+        if old_data.exists():
+            for item in old_data.iterdir():
+                target = new_data / item.name
+                if target.exists():
+                    clean = False             # never replace newer data with the older copy, and never delete it
+                    continue
+                try:
+                    if item.is_dir():
+                        shutil.copytree(str(item), str(target))
+                    else:
+                        shutil.copy2(str(item), str(target))
+                except OSError as e:
+                    clean = False
+                    log(f"migration: could not copy {item.name}: {e!r}")
         old_storage = old_dir / "storage.json"
         new_storage = HOME / "storage.json"
         if old_storage.exists() and not new_storage.exists():
             shutil.copy2(str(old_storage), str(new_storage))
-        shutil.rmtree(str(old_dir), ignore_errors=True)
+        if new_storage.exists():          # an old settings file may still point at the folder we are about to remove
+            try:
+                chosen = json.loads(new_storage.read_text(encoding="utf-8"))
+            except ValueError:
+                chosen = {}
+            p = Path(str(chosen.get("path") or ""))
+            if p and (p == old_data or p == old_dir or old_dir in p.parents):
+                new_storage.write_text(json.dumps({"path": str(new_data)}, indent=1), encoding="utf-8")
+        if clean:                         # anything not copied keeps the old folder, so nothing is ever lost
+            shutil.rmtree(str(old_dir), ignore_errors=True)
     except Exception as e:
         log(f"migration warning: {e!r}")
 
@@ -124,6 +150,54 @@ def seed_storage():
 
 
 _MUTEX = None
+_KILL_WITH = None
+
+
+def kill_tree_on_exit():
+    """Make Windows end everything QlipIt started - ffmpeg, yt-dlp, Edge - when QlipIt ends, even after a crash.
+
+    They all inherit this job object, and Windows kills a job's processes when the last handle to it closes.
+    Without it, closing the window mid-render leaves ffmpeg running, holding the clip file and a processor core."""
+    global _KILL_WITH
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class BasicLimits(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [("ReadOperationCount", ctypes.c_uint64), ("WriteOperationCount", ctypes.c_uint64),
+                        ("OtherOperationCount", ctypes.c_uint64), ("ReadTransferCount", ctypes.c_uint64),
+                        ("WriteTransferCount", ctypes.c_uint64), ("OtherTransferCount", ctypes.c_uint64)]
+
+        class ExtendedLimits(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", BasicLimits), ("IoInfo", IoCounters),
+                        ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return
+        info = ExtendedLimits()
+        info.BasicLimitInformation.LimitFlags = 0x2000           # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            return                                               # JobObjectExtendedLimitInformation = 9
+        if not kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()):
+            return
+        _KILL_WITH = job          # kept for the life of the program: closing it is what kills the children
+    except Exception as e:
+        log(f"could not set up process cleanup: {e!r}")
 
 
 def hold():
@@ -150,7 +224,6 @@ def hold():
 
 def edge():
     """The Edge that is already on every Windows computer, in the places it is normally installed."""
-    import shutil
     found = shutil.which("msedge")
     if found:
         return Path(found)
@@ -395,9 +468,6 @@ def show(url: str) -> int:
         f"--app={url}",
         f"--user-data-dir={HOME / 'window'}",
         f"--window-size={WIDTH},{HEIGHT}",
-        "--window-name=QlipIt Studio",
-        "--class=QlipIt.Studio",
-        "--app-id=QlipIt.Studio",
         "--force-dark-mode",
         "--enable-features=DarkLightMode",
         "--no-first-run",
@@ -429,7 +499,11 @@ def main() -> int:
     log(f"starting: {sys.executable} {' '.join(sys.argv[1:])}")
 
     if "--pick-folder" in sys.argv:
-        Path(sys.argv[sys.argv.index("--pick-folder") + 1]).write_text(ask_folder(), encoding="utf-8")
+        i = sys.argv.index("--pick-folder")
+        if i + 1 >= len(sys.argv):
+            log("--pick-folder needs a file to write the answer to")
+            return 2
+        Path(sys.argv[i + 1]).write_text(ask_folder(), encoding="utf-8")
         return 0
 
     # settings that must be in place before studio.config reads them
@@ -447,10 +521,18 @@ def main() -> int:
         import yt_dlp  # noqa: F401
         import edge_tts  # noqa: F401 - neural voice synthesis
         from studio import config, tools
-        log(f"selftest ok: {config.DATA_DIR} | ffmpeg missing={tools.missing()}")
-        return 0
+        # A bundle is only good if everything it will need is inside it. Saying so with an exit code is what lets
+        # the build refuse to publish an app that would fail on someone's computer.
+        wanted = [config.ROOT / "web" / "index.html", config.ROOT / "web" / "landing.html",
+                  config.ROOT / "web" / "brand" / "favicon.svg", config.ROOT / "studio" / "fonts" / "Poppins-ExtraBold.ttf",
+                  config.ROOT / "desktop" / "qlipit.ico"]
+        missing = [str(p) for p in wanted if not p.is_file()]
+        bad = bool(tools.missing()) or bool(missing)
+        log(f"selftest {'FAILED' if bad else 'ok'}: {config.DATA_DIR} | ffmpeg missing={tools.missing()} | files missing={missing}")
+        return 1 if bad else 0
 
     lock = hold()                          # held for as long as this program runs
+    kill_tree_on_exit()                    # ...and everything it starts ends with it, even after a crash
     if lock is None:
         for _ in range(40):                # the copy that is open may still be starting
             for p in range(FIRST_PORT, FIRST_PORT + 20):

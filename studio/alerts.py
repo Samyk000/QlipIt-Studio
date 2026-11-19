@@ -37,7 +37,7 @@ def send(text: str) -> list:
 
 
 def notify(text: str, kind: str = "live", link: str = ""):
-    """Fire and forget, so a slow network never holds up recording or posting. Also shows in the app's bell."""
+    """Fire and forget, so a slow network never holds up recording. Also shows in the app's bell."""
     try:
         from . import notices
         uid = ctx.uid_or_none()
@@ -65,7 +65,7 @@ def digest_loop(make_summary):
 
 
 def keep_awake_loop(is_busy):
-    """Stops Windows going to sleep while something is recording or waiting to post."""
+    """Stops Windows going to sleep while something is recording."""
     if os.name != "nt":
         return  # servers don't go to sleep
     import ctypes

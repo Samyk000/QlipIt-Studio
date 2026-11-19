@@ -121,15 +121,26 @@ def _use_link(token: str, purpose: str) -> str:
     """The account a link belongs to. Each link works once and only until it expires."""
     if not token or len(token) > 200:
         raise AuthError("That link isn't valid.")
+    now = time.time()
+    token_hash = _h(token)
     with db.engine.begin() as c:
-        row = c.execute(sa.select(db.email_tokens).where(db.email_tokens.c.token_hash == _h(token),
-                                                          db.email_tokens.c.purpose == purpose)).first()
-        if not row or row.used_at:
-            raise AuthError("That link has already been used or isn't valid. Ask for a new one.")
-        if row.expires_at < time.time():
-            raise AuthError("That link has expired. Ask for a new one.")
-        c.execute(db.email_tokens.update().where(db.email_tokens.c.token_hash == row.token_hash).values(used_at=time.time()))
-    return row.user_id
+        claimed = c.execute(
+            db.email_tokens.update().where(
+                db.email_tokens.c.token_hash == token_hash,
+                db.email_tokens.c.purpose == purpose,
+                db.email_tokens.c.used_at.is_(None),
+                db.email_tokens.c.expires_at >= now,
+            ).values(used_at=now).returning(db.email_tokens.c.user_id)
+        ).first()
+        if claimed:
+            return claimed.user_id
+        row = c.execute(sa.select(db.email_tokens.c.used_at, db.email_tokens.c.expires_at).where(
+            db.email_tokens.c.token_hash == token_hash,
+            db.email_tokens.c.purpose == purpose,
+        )).first()
+    if row and row.used_at is None and row.expires_at < now:
+        raise AuthError("That link has expired. Ask for a new one.")
+    raise AuthError("That link has already been used or isn't valid. Ask for a new one.")
 
 
 def send_verify(u) -> bool:

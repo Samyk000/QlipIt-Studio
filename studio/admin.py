@@ -7,7 +7,7 @@ change it, and no email address is special in the code. It is set by hand, on th
     python -m studio.admin grant someone@example.com
     python -m studio.admin revoke someone@example.com
 
-Admins see accounts and AI use. They do not see anyone's videos, clips or connected accounts."""
+Admins see accounts and AI use. They do not see anyone's videos or clips."""
 import shutil
 import sys
 import time
@@ -94,7 +94,7 @@ def overview() -> dict:
 
 
 def user_detail(uid: str) -> dict:
-    """One account's AI use. Not their videos, clips or connected accounts."""
+    """One account's AI use. Not their videos or clips."""
     g = db.usage.c
     tok = g.tokens_in + g.tokens_out
     with db.engine.connect() as c:

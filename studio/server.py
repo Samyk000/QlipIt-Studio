@@ -1,7 +1,7 @@
 """QlipIt Studio web server. Run with:  python -m studio.server
 
 Public pages:  /  /login  /signup          The app:  /app  (signed-in users only)
-Everything under /api, /media and /oauth needs a session, except /api/auth/* and /api/public."""
+Everything under /api and /media needs a session, except /api/auth/* and /api/public."""
 import hashlib
 import hmac
 import json
@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 
 from . import admin as admins
 from . import account, load
-from . import (accounts, ai, alerts, auth, brain, config, creators, ctx, db, fetch_model, jobs, live, media, posting,
+from . import (accounts, ai, alerts, auth, brain, config, creators, ctx, db, fetch_model, jobs, live, media,
                profiles, render, safe, states, transcribe, usage, voice)
 
 from . import tools as _tools  # noqa: E402
@@ -37,7 +37,7 @@ def _quiet(fn):
 app = FastAPI(title="QlipIt Studio", docs_url=None, redoc_url=None, openapi_url=None)
 WEB = config.ROOT / "web"
 PUBLIC = config.ROOT / "public"
-OPEN = ("/api/auth/", "/pub/", "/api/public", "/auth/google/", "/auth/verify", "/brand/", "/public/", "/assets/", "/healthz", "/favicon.ico", "/robots.txt", "/sitemap.xml", "/manifest.json", "/api/voice/", "/api/speech-model")
+OPEN = ("/api/auth/", "/api/public", "/auth/google/", "/auth/verify", "/brand/", "/public/", "/assets/", "/healthz", "/favicon.ico", "/robots.txt", "/sitemap.xml", "/manifest.json", "/api/speech-model")
 PAGES = {"/": "landing.html", "/login": "auth.html", "/signup": "auth.html", "/reset": "reset.html",
          "/privacy": "legal.html", "/terms": "legal.html", "/acceptable-use": "legal.html"}
 VIDEO_TYPES = {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".ts", ".flv"}
@@ -72,7 +72,8 @@ def _startup():
         threading.Thread(target=lambda: _quiet(fetch_model.ensure), daemon=True).start()
     jobs.start()
     live.start()
-    posting.start()
+    threading.Thread(target=alerts.digest_loop, args=(creators.digest_text,), daemon=True).start()
+    threading.Thread(target=alerts.keep_awake_loop, args=(lambda: bool(live.active()),), daemon=True).start()
     from . import updates
     updates.start()                  # looks for a newer QlipIt Studio every minute, in the background
 
@@ -253,9 +254,10 @@ def _ip(request: Request) -> str:
     """The visitor's address, used for rate limits. The connection's own address, or the one the proxy in front
     reports (QLIPIT_TRUST_PROXY). If that connection comes from the CDN, the CDN's header names the real visitor
     (QLIPIT_CLIENT_IP_HEADER). The header is believed only when the CDN really sent the request, so nobody can
-    pick their own address by sending it themselves."""
+    pick their own address by sending it themselves. Only the proxy's own entry (the last one) is used: anything
+    before it came from the visitor."""
     fwd = request.headers.get("x-forwarded-for", "")
-    peer = (fwd.split(",")[0].strip() if fwd and (config.env("QLIPIT_TRUST_PROXY") or config.env("PEAKCUT_TRUST_PROXY")) else "") or (request.client.host if request.client else "")
+    peer = (fwd.split(",")[-1].strip() if fwd and (config.env("QLIPIT_TRUST_PROXY") or config.env("PEAKCUT_TRUST_PROXY")) else "") or (request.client.host if request.client else "")
     named = config.env("QLIPIT_CLIENT_IP_HEADER") or config.env("PEAKCUT_CLIENT_IP_HEADER")
     if named and request.headers.get(named) and _from_cdn(peer):
         return request.headers[named].split(",")[0].strip()[:64]
@@ -605,7 +607,7 @@ def status(request: Request):
     me_ = _me(request)
     return {"user": auth.public(me_), "update": updates.latest() if me_.is_admin else None, "accounts": config.ACCOUNTS, "disk_full": load.disk_full(), "no_ffmpeg": bool(_tools.missing()), "links": {"repo": config.REPO_URL, "follow": config.FOLLOW_URL}, "ai": usage.brief(), "unread": notices.unread(),
             "tour": not accounts.settings()["tour_done"],
-            "youtube": accounts.youtube_ready(), "connect": {p: accounts.can_connect(p) for p in accounts.PLATFORM_NAMES}, "max_upload_mb": config.MAX_UPLOAD_MB, "upload_part_mb": config.UPLOAD_PART_MB, "max_batch": config.MAX_ACTIVE_JOBS_PER_USER,
+            "max_upload_mb": config.MAX_UPLOAD_MB, "upload_part_mb": config.UPLOAD_PART_MB, "max_batch": config.MAX_ACTIVE_JOBS_PER_USER,
             "styles": {k: v["label"] for k, v in render.STYLES.items()}, "layouts": render.LAYOUTS,
             "voices": voice.list_voices(), "speech_model_ready": transcribe.model_ready()}
 
@@ -702,7 +704,7 @@ def sync(v: str = ""):
         return _sync_unchanged(v) or {"v": token}
     from . import notices
     return {"v": token, "jobs": [jobs.public(j) for j in jobs.list_jobs()], "creators": _creator_rows(),
-            "accounts": accounts.list_accounts(), "ai": usage.brief(), "unread": notices.unread()}
+            "ai": usage.brief(), "unread": notices.unread()}
 
 
 @app.get("/api/jobs")
@@ -813,7 +815,27 @@ def create_from_file(file: UploadFile = File(...), options: str = Form("{}"), cr
 # for anything standing in front of the app. Nothing is trusted from the page: the sizes are fixed when the upload
 # starts, every piece must be exactly its size, and only the account that started an upload can add to it.
 _UP_ID = re.compile(r"[0-9a-f]{24}")
-_up_lock = threading.Lock()
+_up_locks: dict = {}                 # one lock per upload, so a piece cannot land while the pieces are being joined
+_up_locks_guard = threading.Lock()
+
+
+def _up_lock_for(upid: str) -> threading.Lock:
+    with _up_locks_guard:
+        return _up_locks.setdefault(upid, threading.Lock())
+
+
+def _up_forget(upid: str):
+    with _up_locks_guard:
+        _up_locks.pop(upid, None)
+
+
+def _up_place_part(upid: str, n: int, tmp: Path):
+    """Atomically place one received piece without making the event loop wait for the upload lock."""
+    d = _up_root() / f"up-{upid}"
+    with _up_lock_for(upid):
+        if _up_get(upid).get("status") != states.UploadStatus.RECEIVING:
+            raise HTTPException(409, "This upload is already being put together.")
+        tmp.replace(d / f"{n:05d}.part")  # sending a piece again simply replaces it
 
 
 def _up_root() -> Path:
@@ -828,6 +850,7 @@ def _up_sweep():
         try:
             if d.is_dir() and time.time() - d.stat().st_mtime > 6 * 3600:
                 shutil.rmtree(d, ignore_errors=True)
+                _up_forget(d.name[3:])
         except OSError:
             pass
 
@@ -860,8 +883,6 @@ def upload_start(body: dict = Body(...)):
         raise HTTPException(400, "Bad file size.")
     if size > config.MAX_UPLOAD_MB * 1024 * 1024:
         raise HTTPException(413, f"That file is too big. The limit is {config.MAX_UPLOAD_MB} MB.")
-    if _disk.get(ctx.uid(), (0, 0))[1] + size > config.MAX_USER_GB * 1e9:
-        raise HTTPException(507, "There isn't room for this file in your storage. Delete some older videos to make room.")
     creator = str(body.get("creator") or "")
     if creator and not creators.get(creator):
         raise HTTPException(404, "No such creator")
@@ -871,14 +892,19 @@ def upload_start(body: dict = Body(...)):
     except (ValueError, TypeError):
         raise HTTPException(400, "Those options aren't valid.")
     _up_sweep()
-    mine = 0
+    mine, pending = 0, 0
     for d in _up_root().glob("up-*"):
         try:
-            mine += json.loads((d / "meta.json").read_text(encoding="utf-8")).get("user") == ctx.uid()
+            meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            pass
+            continue
+        if meta.get("user") == ctx.uid():
+            mine += 1
+            pending += int(meta.get("size") or 0)      # started, but not on disk yet
     if mine >= config.MAX_ACTIVE_JOBS_PER_USER:
         raise HTTPException(429, f"You already have {mine} uploads in progress. Let one finish first.")
+    if _disk.get(ctx.uid(), (0, 0))[1] + pending + size > config.MAX_USER_GB * 1e9:
+        raise HTTPException(507, "There isn't room for this file in your storage. Delete some older videos to make room.")
     part = config.UPLOAD_PART_MB * 1024 * 1024
     upid = os.urandom(12).hex()
     d = _up_root() / f"up-{upid}"
@@ -891,7 +917,11 @@ def upload_start(body: dict = Body(...)):
 
 @app.put("/api/upload/{upid}/{n}")
 async def upload_part(request: Request, upid: str, n: int):
+    if not _UP_ID.fullmatch(upid or ""):
+        raise HTTPException(404, "No such upload")
     meta = await run_in_threadpool(_up_get, upid)
+    if meta.get("status") != states.UploadStatus.RECEIVING:
+        raise HTTPException(409, "This upload is already being put together.")
     if not 0 <= n < meta["parts"]:
         raise HTTPException(400, "No such piece.")
     want = meta["part"] if n < meta["parts"] - 1 else meta["size"] - meta["part"] * (meta["parts"] - 1)
@@ -907,29 +937,36 @@ async def upload_part(request: Request, upid: str, n: int):
                 await run_in_threadpool(f.write, chunk)
         if got != want:
             raise HTTPException(400, "That piece is the wrong size.")
-        tmp.replace(d / f"{n:05d}.part")           # sending a piece again simply replaces it
+        # The whole piece is here: only now may it take the part's place. Finishing a large upload can hold this
+        # lock while joining files, so wait in the request thread pool rather than freezing every async request.
+        await run_in_threadpool(_up_place_part, upid, n, tmp)
+        return {"ok": True, "n": n}
+    except OSError:
+        raise HTTPException(409, "This upload was cancelled. Start it again.")
     finally:
         tmp.unlink(missing_ok=True)
-    return {"ok": True, "n": n}
+        if not (d / "meta.json").is_file():
+            _up_forget(upid)                           # gone (expired or cancelled): do not keep its lock
 
 
 @app.post("/api/upload/{upid}/finish")
 def upload_finish(upid: str):
-    meta = _up_get(upid)
-    _need_verified()
     d = _up_root() / f"up-{upid}"
-    with _up_lock:                                    # two "finish" calls for one upload make one video, not two
-        if not (d / "meta.json").is_file():
-            raise HTTPException(404, "This upload has expired. Start it again.")
-        if meta.get("status") == states.UploadStatus.ASSEMBLING:
-            raise HTTPException(409, "This upload is currently assembling.")
-        meta["status"] = states.UploadStatus.ASSEMBLING
+    lock = _up_lock_for(upid)
+    with lock:                                        # two "finish" calls for one upload make one video, not two
+        meta = _up_get(upid)
+        _need_verified()
+        if meta.get("status") != states.UploadStatus.RECEIVING:
+            raise HTTPException(409, "This upload is already being put together." if meta.get("status") == states.UploadStatus.ASSEMBLING
+                                else "This upload has expired. Start it again.")
         parts = [d / f"{i:05d}.part" for i in range(meta["parts"])]
         missing = [i for i, p in enumerate(parts) if not p.is_file()]
         if missing:
             raise HTTPException(409, f"Piece {missing[0] + 1} of {meta['parts']} has not arrived yet.")
         if sum(p.stat().st_size for p in parts) != meta["size"]:
             raise HTTPException(400, "The pieces do not add up to the file.")
+        meta["status"] = states.UploadStatus.ASSEMBLING     # written down, so a piece landing now is refused
+        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
         try:
             with _create_lock:
                 _job_slots()
@@ -937,6 +974,10 @@ def upload_finish(upid: str):
                                   creator=meta["creator"] or None)
         except (ValueError, TypeError):
             raise HTTPException(400, "Those options aren't valid.")
+        except Exception:
+            meta["status"] = states.UploadStatus.RECEIVING      # no slot yet: the upload may be finished later
+            (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+            raise
         dest = jobs.job_dir(job["id"]) / ("source" + meta["ext"])
         try:
             with dest.open("wb") as out:
@@ -947,6 +988,7 @@ def upload_finish(upid: str):
             jobs.delete(job["id"])
             raise HTTPException(507, "There wasn't room to save this file. Delete some older videos and try again.")
         shutil.rmtree(d, ignore_errors=True)
+    _up_forget(upid)
     _disk.pop(ctx.uid(), None)
     job["source"]["path"] = str(dest)
     jobs.enqueue(job)
@@ -955,8 +997,11 @@ def upload_finish(upid: str):
 
 @app.delete("/api/upload/{upid}")
 def upload_cancel(upid: str):
-    _up_get(upid)
-    shutil.rmtree(_up_root() / f"up-{upid}", ignore_errors=True)
+    lock = _up_lock_for(upid)
+    with lock:
+        _up_get(upid)
+        shutil.rmtree(_up_root() / f"up-{upid}", ignore_errors=True)
+    _up_forget(upid)
     return {"ok": True}
 
 
@@ -993,10 +1038,13 @@ async def get_voice_sample(voice_id: str):
 
 
 @app.post("/api/voice/preview")
-async def preview_voiceover(body: dict = Body(...)):
+async def preview_voiceover(request: Request, body: dict = Body(...)):
     text = str(body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "Text is required.")
+    if len(text) > 1200:
+        raise HTTPException(400, "That is too much text for a preview. Try the first few sentences.")
+    _throttle("voiceprev:" + _me(request).id, 60, 3600)     # a preview costs money-free but real bandwidth
     v_info = voice.voice_info(str(body.get("voice") or voice.DEFAULT_VOICE))
     rate = str(body.get("rate") or "+0%")
     import tempfile
@@ -1057,13 +1105,15 @@ def speech_model_status():
 
 
 @app.post("/api/speech-model/download")
-def speech_model_download():
+def speech_model_download(request: Request):
+    _admin(request)
     fetch_model.start_background_download()
     return {"ok": True, "status": fetch_model.status()}
 
 
 @app.delete("/api/speech-model")
-def speech_model_delete():
+def speech_model_delete(request: Request):
+    _admin(request)
     ok = fetch_model.delete_model()
     return {"ok": ok, "status": fetch_model.status()}
 
@@ -1336,6 +1386,7 @@ def edit_creator(cid: str, body: dict = Body(...)):
 @app.post("/api/creators/{cid}/live")
 def go_live(cid: str, body: dict = Body(default={})):
     _need_verified()
+    _quota()                     # a recording writes for hours: refuse it now rather than let it fill the disk
     try:
         c = creators.get(cid)
     except ValueError:
@@ -1432,10 +1483,10 @@ def ai_test(request: Request):
         raise HTTPException(502, ai.explain(e) or "The AI did not answer: " + _ai_error(e))
 
 
-# ================================================================ posting, accounts, settings
+# ================================================================ overview and settings
 @app.get("/api/overview")
 def overview():
-    return posting.overview()
+    return creators.overview()
 
 
 @app.get("/api/settings")
@@ -1450,69 +1501,6 @@ def put_settings(body: dict = Body(...)):
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
     return accounts.public_settings()
-
-
-@app.get("/api/accounts")
-def list_accounts():
-    return accounts.list_accounts()
-
-
-@app.delete("/api/accounts/{aid}")
-def remove_account(aid: str):
-    accounts.remove(aid)
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------- connecting YouTube, Instagram and TikTok
-# Connect sends the browser to the platform's own sign-in page; the platform sends it back here, and the person lands
-# on Settings, Connected apps, with the account added (or a message saying what went wrong).
-def _back(**q):
-    from urllib.parse import urlencode as _ue
-    return RedirectResponse("/app/settings/apps?" + _ue(q), 303)
-
-
-@app.get("/oauth/{platform}/start")
-def connect_start(platform: str):
-    if platform not in accounts.PLATFORM_NAMES:
-        raise HTTPException(404)
-    try:
-        return RedirectResponse(accounts.connect_url(platform), 303)
-    except ValueError as e:
-        return _back(connect_error=str(e))
-
-
-@app.get("/oauth/{platform}/callback")
-def connect_callback(platform: str, code: str = "", state: str = "", error: str = "", error_description: str = "",
-                     error_reason: str = ""):
-    if platform not in accounts.PLATFORM_NAMES:
-        raise HTTPException(404)
-    name = accounts.PLATFORM_NAMES[platform]
-    if error or not code:
-        why = "you cancelled" if error in ("access_denied",) or error_reason == "user_denied" else (error_description or error or "no sign-in code came back")
-        return _back(connect_error=f"{name} was not connected: {why[:160]}.")
-    try:
-        _throttle("connect:" + ctx.uid(), 30, 600)
-        acc = accounts.connect_finish(platform, code, state)
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        return _back(connect_error=f"{name} was not connected: {safe.friendly(e, 240)}")
-    return _back(connected=platform, name=acc["name"])
-
-
-@app.get("/pub/{token}.mp4")
-def public_clip(token: str):
-    """A clip for a platform to fetch while posting it: one clip, one hour, signed (see accounts.clip_link)."""
-    got = accounts.read_clip_link(token)
-    if not got:
-        raise HTTPException(404)
-    uid, job_id, name = got
-    with ctx.as_user(uid):
-        job = jobs.get(job_id) if re.fullmatch(r"[\w\-]{8,60}", job_id) else None
-        f = Path(job["dir"]) / "clips" / name if job else None
-    if not f or not f.is_file():
-        raise HTTPException(404)
-    return FileResponse(f, media_type="video/mp4", headers={"Cache-Control": "private, no-store"})
 
 
 # ---------------------------------------------------------------- where QlipIt keeps everything (Settings, Storage)
@@ -1563,44 +1551,6 @@ def storage_put(request: Request, body: dict = Body(...)):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return storage.info(_on_this_computer(request))
-
-
-@app.get("/api/apps")
-def apps_get(request: Request):
-    _admin(request)
-    return accounts.apps_public()
-
-
-@app.put("/api/apps")
-def apps_put(request: Request, body: dict = Body(...)):
-    _admin(request)
-    try:
-        return accounts.save_app(str(body.get("platform", "")), body.get("client_id"), body.get("client_secret"))
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/api/posts")
-def add_posts(body: dict = Body(...)):
-    job = jobs.get(str(body.get("job")))
-    clip = next((c for c in job["clips"] if c["id"] == body.get("clip")), None) if job else None
-    if not clip or clip.get("status") != "done":
-        raise HTTPException(404, "That clip is not ready")
-    made = posting.enqueue(job, clip, [str(a) for a in body.get("accounts", [])][:20], now=bool(body.get("now")))
-    if not made:
-        raise HTTPException(400, "Nothing was queued. Pick at least one account this clip has not already gone to.")
-    return {"queued": len(made)}
-
-
-@app.post("/api/posts/{pid}/{action}")
-def post_action(pid: str, action: str):
-    try:
-        {"cancel": posting.cancel, "retry": posting.retry}[action](pid)
-    except KeyError:
-        raise HTTPException(404)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    return {"ok": True}
 
 
 @app.post("/api/alerts/test")

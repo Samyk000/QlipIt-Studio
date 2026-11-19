@@ -20,14 +20,14 @@
 
 ## ⚡ Why QlipIt Studio?
 
-Creating vertical content manually is tedious: finding key moments, cropping to 9:16, adding captions, recording voiceovers, and publishing across platforms eats hours of creator time.
+Creating vertical content manually is tedious: finding key moments, cropping to 9:16, adding captions, recording voiceovers, and preparing exports eats hours of creator time.
 
 **QlipIt Studio automates the entire pipeline:**
 1. **Paste any link** (YouTube, Twitch, Kick, or local video file).
 2. **AI detects high-retention moments** with hook scoring and virality analysis.
 3. **Smart auto-crop to 9:16** with animated word-by-word kinetic captions.
 4. **Add neural voiceover narration** with automatic background audio ducking.
-5. **Auto-publish directly** to YouTube Shorts, Instagram Reels, and TikTok.
+5. **Download finished clips** with generated titles, descriptions, and hashtags.
 
 ---
 
@@ -40,7 +40,7 @@ Creating vertical content manually is tedious: finding key moments, cropping to 
 | 🔴 **Live Stream Clipping** | Clip live Twitch, Kick, or YouTube streams in real time as the action unfolds using chat activity and loudness. |
 | 💬 **Kinetic Word Captions** | 3 animated caption styles (*Bounce*, *Clean*, *Hype*) with syllable timing and multilingual support. |
 | 📱 **9:16 Smart Reframing** | Automatically crops and centers streamer cameras, gameplay, and video subjects for vertical screens. |
-| 🚀 **Social Auto-Publishing** | Connect YouTube, Instagram, and TikTok accounts with schedule queues, spacing, and daily safety caps. |
+| 📦 **Ready-to-Use Exports** | Download finished clips and copy their generated titles, descriptions, and hashtags. |
 | 🔒 **100% Private & Local** | No sign-in required on your personal desktop. Your keys, videos, and data never leave your computer. |
 
 ---

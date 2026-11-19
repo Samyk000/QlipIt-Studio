@@ -266,7 +266,7 @@ def find_clips(words, db, duration, title="", uploader="", max_clips=6, min_len=
         try:
             out, used_model, spent = ask_ai(prompt, purpose="Video: finding clips")
             tokens += spent
-            found += [c for c in out if isinstance(c, dict) and a - 5 <= float(c.get("start", -1)) < b]
+            found += [c for c in out if isinstance(c, dict) and a - 5 <= _num(c.get("start"), -1) < b]
         except Exception as e:  # noqa: BLE001
             log(f"AI window {a:.0f}-{b:.0f}s failed: {e}")
     note = ""

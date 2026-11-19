@@ -370,7 +370,7 @@ async function userDialog(id) {
       <div><b>${num(row.videos)}</b><span>Videos</span></div><div><b>${num(row.clips)}</b><span>Clips</span></div>
       <div><b>${esc(day(u.created_at))}</b><span>Joined</span></div><div><b>${esc(ago(u.last_seen))}</b><span>Last active</span></div>
       <div><b>${num(u.signed_in_devices)}</b><span>Signed-in devices</span></div><div><b>${row.verified === false ? "No" : "Yes"}</b><span>Email confirmed</span></div></div>
-    <p class="note">You can see how much this account uses the AI. Their videos, clips and connected accounts stay private to them.</p>
+    <p class="note">You can see how much this account uses the AI. Their videos and clips stay private to them.</p>
     <h3>What they use the AI for</h3>${hbars(u.by_purpose, r => `${kfmt(r[1])} tokens · ${num(r[2])} call${r[2] === 1 ? "" : "s"}`)}
     <h3>Latest AI calls</h3>
     ${u.recent.length ? `<div class="scroll"><table><tr><th>When</th><th>What</th><th class="num">Tokens</th></tr>

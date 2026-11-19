@@ -164,10 +164,15 @@ def test_render_clip_with_voiceover():
 
 
 def test_voice_api_endpoints():
+    import time
     from fastapi.testclient import TestClient
+    from studio import auth, db
     from studio.server import app
 
+    db.init()
+    user, _ = auth._create(f"voice-{time.time_ns()}@example.com", "Voice test", password_hash="x")
     client = TestClient(app, base_url="http://127.0.0.1:8765")
+    client.cookies.set(auth.COOKIE, auth.start_session(user.id))
     origin = {"Origin": "http://127.0.0.1:8765"}
 
     # 1. Test voice listing

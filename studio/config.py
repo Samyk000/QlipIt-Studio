@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _load_dotenv():
+    if os.environ.get("QLIPIT_LOAD_DOTENV", "1") == "0":
+        return
     f = ROOT / ".env"
     if not f.exists():
         return
@@ -152,8 +154,13 @@ def _data_folder():
                          f"  Connect that drive and start QlipIt again, or delete {STORAGE_FILE} to go back to the\n"
                          f"  folder inside QlipIt (your videos and clips stay where they are).\n")
     if chosen.get("move_from"):
-        if _move_folder(Path(chosen["move_from"]), new):
+        # Switch to the new folder only once the move finished. If it stopped half-way, stay in whichever folder
+        # still holds the database, so the app never opens an empty one and looks like everything was lost.
+        old = Path(chosen["move_from"])
+        if _move_folder(old, new):
             STORAGE_FILE.write_text(json.dumps({"path": str(new)}, indent=1), encoding="utf-8")
+        elif (old / "qlipit.db").exists() or (old / "peakcut.db").exists():
+            return old, "chosen"          # storage.json keeps move_from, so the move is tried again next start
     return new, "chosen"
 
 
