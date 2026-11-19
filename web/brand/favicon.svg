@@ -1,0 +1,50 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="qBg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#141724"/>
+      <stop offset="100%" stop-color="#0B0D13"/>
+    </linearGradient>
+    <linearGradient id="qBorder" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7952FF" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0.4"/>
+    </linearGradient>
+    <linearGradient id="qGrad" x1="80" y1="80" x2="440" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7952FF"/>
+      <stop offset="50%" stop-color="#8F5CFF"/>
+      <stop offset="100%" stop-color="#00E5FF"/>
+    </linearGradient>
+    <linearGradient id="tailGrad" x1="280" y1="280" x2="440" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#7952FF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Squircle with sleek gradient border -->
+  <rect x="12" y="12" width="488" height="488" rx="116" fill="url(#qBg)" stroke="url(#qBorder)" stroke-width="12"/>
+
+  <!-- Q Body Ring (Outer radius 132, Inner radius 76) -->
+  <path d="M 236 104
+           C 308.9 104, 368 163.1, 368 236
+           C 368 268.4, 356.3 298.1, 336.8 321.2
+           L 297.4 281.8
+           C 307.7 268.5, 314 251.5, 314 236
+           C 314 192.9, 179.1 158, 236 158
+           C 192.9 158, 158 192.9, 158 236
+           C 158 279.1, 192.9 314, 236 314
+           C 251.5 314, 268.5 307.7, 281.8 297.4
+           L 321.2 336.8
+           C 298.1 356.3, 268.4 368, 236 368
+           C 163.1 368, 104 308.9, 104 236
+           C 104 163.1, 163.1 104, 236 104 Z"
+        fill="url(#qGrad)"/>
+
+  <!-- Center Play Cut Triangle -->
+  <path d="M 216 198 L 278 236 L 216 274 Z" fill="#00E5FF"/>
+
+  <!-- Dynamic Precision Cut Scissor Tail -->
+  <path d="M 288 288 L 388 388 C 398 398, 414 398, 424 388 C 434 378, 434 362, 424 352 L 334 262 Z"
+        fill="url(#tailGrad)"/>
+
+  <!-- Accent Spark -->
+  <circle cx="388" cy="148" r="14" fill="#00E5FF"/>
+</svg>

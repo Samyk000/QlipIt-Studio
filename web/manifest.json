@@ -1,0 +1,28 @@
+{
+  "name": "QlipIt Studio",
+  "short_name": "QlipIt",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0D11",
+  "theme_color": "#7952FF",
+  "description": "QlipIt AI Video Clipping Studio",
+  "icons": [
+    {
+      "src": "/brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/brand/favicon.ico",
+      "sizes": "16x16 32x32 48x48 256x256",
+      "type": "image/x-icon"
+    }
+  ]
+}

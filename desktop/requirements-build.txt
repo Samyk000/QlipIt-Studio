@@ -1,0 +1,3 @@
+# What building the Windows app needs, on top of requirements.txt: PyInstaller puts Python and the app in one
+# folder, Inno Setup wraps that folder in an installer (winget install JRSoftware.InnoSetup - not a Python package).
+pyinstaller==6.22.3

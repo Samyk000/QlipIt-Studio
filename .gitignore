@@ -1,0 +1,47 @@
+# ---- never publish: settings, keys and anything users made
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*service-account*.json
+*client_secret*.json
+data/
+storage.json
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+*.log
+
+# ---- this computer only
+.claude/
+CLAUDE.local.md
+.vscode/
+.idea/
+*.bat
+Thumbs.db
+.DS_Store
+
+# ---- Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# ---- building the Windows app (desktop/) - these are made, not kept
+desktop/build/
+desktop/dist/
+desktop/ffmpeg/
+desktop/models/
+
+# ---- diagnostics, screenshots & local agent tools
+chrome-*-profile*/
+chrome-test-profile/
+*.png
+!web/brand/*.png
+top_left_crop.png
+.agents/
+skills-lock.json
