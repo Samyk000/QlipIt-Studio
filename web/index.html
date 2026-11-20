@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QlipIt Studio</title>
-<link rel="icon" type="image/x-icon" href="/brand/favicon.ico?v=1.0.1">
-<link rel="shortcut icon" href="/brand/favicon.ico?v=1.0.1">
-<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg?v=1.0.1">
-<link rel="manifest" href="/manifest.json?v=1.0.1">
+<link rel="icon" type="image/x-icon" href="/brand/favicon.ico?v=dc767801">
+<link rel="shortcut icon" href="/brand/favicon.ico?v=dc767801">
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg?v=dc767801">
+<link rel="manifest" href="/manifest.json?v=dc767801">
 <meta name="theme-color" content="#f7f6f2">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="QlipIt Studio">
-<link rel="apple-touch-icon" href="/brand/icon-192.png?v=1.0.1">
+<link rel="apple-touch-icon" href="/brand/icon-192.png?v=dc767801">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&family=Inter:wght@400;500;600&family=Archivo+Black&family=Anton&family=Poppins:wght@700;800&display=swap" rel="stylesheet">
@@ -108,7 +108,7 @@ svg{width:18px;height:18px;flex:none;fill:currentColor}
 .side{background:var(--canvas);color:var(--frame-text);display:flex;flex-direction:column;height:100vh;padding:16px 12px 14px;min-width:0;border-right:1px solid var(--linen)}
 .side-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 18px}
 .brand-link{display:flex;align-items:center;gap:12px;min-width:0;text-decoration:none;color:var(--ink)}
-.brand-icon{display:block;width:36px;height:36px;flex-shrink:0;border-radius:9px;object-fit:contain;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.brand-icon{display:block;width:80px;height:45px;flex-shrink:0;object-fit:contain}
 .brand-text{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}
 .brand-name{font-family:var(--font-display);font-weight:600;font-size:20px;letter-spacing:-.8px;color:var(--ink)}
 .brand-badge{font-size:9.5px;font-weight:700;letter-spacing:.6px;background:var(--oat);color:var(--pebble);padding:2px 6px;border-radius:999px;border:1px solid var(--linen)}
@@ -166,6 +166,12 @@ main{background:var(--bg);margin:8px 8px 8px 0;border-radius:var(--r-lg);height:
 .vb span{flex:1;min-width:0}
 .vb b{color:#5A2C06}
 @media (max-width:640px){.vb{margin:10px 16px 0;flex-wrap:wrap}}
+.vb.ai-warning{gap:8px;flex-wrap:nowrap;padding:6px 8px 6px 12px;min-height:42px;font-size:13px;animation:none}
+.vb.ai-warning>svg{width:16px;height:16px}
+.vb.ai-warning>.btn{height:28px;padding:0 10px;background:transparent;border-color:rgba(122,62,12,.2);color:inherit;font-size:12px}
+.vb.ai-warning>.icon-btn{width:28px;height:28px;color:inherit}
+.vb.ai-warning>.icon-btn svg{width:14px;height:14px}
+.vb.ai-warning>.btn:hover,.vb.ai-warning>.icon-btn:hover{background:rgba(122,62,12,.08)}
 .topbar .titles{flex:1;min-width:0}
 #tpic:empty{display:none}
 #tpic img,#tpic .avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;display:block;font-size:15px}
@@ -358,6 +364,7 @@ label.ck input{accent-color:var(--brand);margin:0}
 @keyframes pulse{50%{opacity:.3}}
 .empty{border:1px dashed var(--line-2);border-radius:var(--r);padding:48px 20px;text-align:center;color:var(--dim);display:flex;flex-direction:column;align-items:center;gap:4px}
 .empty img{width:56px;height:56px;margin-bottom:12px}
+.empty.brand-empty img{width:80px;height:80px;object-fit:contain}
 .empty b{display:block;color:var(--brand-ink);font-size:15px;font-weight:600}
 
 /* ---------- home hero + composer */
@@ -947,6 +954,7 @@ dialog[open]{animation:fadein .16s ease}
 @keyframes fadein{from{opacity:0}}
 
 /* ---------- responsive */
+@media (min-width:901px){.side-head .collapse{display:none}}
 @media (max-width:1100px){.tiles,.tiles.five{grid-template-columns:repeat(2,minmax(0,1fr))}.home-grid,.split{grid-template-columns:1fr}}
 @media (max-width:900px){
   .app,.app.mini{grid-template-columns:1fr}
@@ -978,9 +986,8 @@ dialog[open]{animation:fadein .16s ease}
   <aside class="side" id="sidebar" aria-label="Workspace navigation">
     <div class="side-head">
       <a href="/" class="brand-link" aria-label="QlipIt Studio">
-        <img class="brand-icon" src="/brand/icon-192.png" alt="QlipIt">
+        <img class="brand-icon" src="/brand/icon-192.png?v=dc767801" alt="QlipIt" width="45" height="70">
         <div class="brand-text">
-          <span class="brand-name">Qlip<span style="color:var(--ether-blue)">It</span></span>
           <span class="brand-badge">STUDIO</span>
         </div>
       </a>
@@ -1126,6 +1133,7 @@ function ask(title, text, okLabel = "Confirm", danger = false) {
 const S = {status:{styles:{}, layouts:{}}, jobs:[], creators:[], overview:null, settings:null,
            view:"overview", ctab:"clips"};
 const D = {jid:null, cid:null, sig:""};
+let aiWarningKey = "", dismissedAIWarningKey = "";
 const creatorId = () => S.view.startsWith("c:") ? S.view.slice(2) : null;
 const creator = () => S.creators.find(c => c.id === creatorId());
 const jobOf = id => S.jobs.find(j => j.id === id);
@@ -1318,7 +1326,7 @@ function updateHow() {
 }
 function greeting() { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; }
 let lastInd = null;
-addEventListener("resize", () => { lastInd = null; const i = $("#utabs .ind"); if (i) i.remove(); moveInd(); });   // where the orange pill was, so it can slide from there to the new tab
+addEventListener("resize", () => { if (innerWidth > 900) $("#app").classList.remove("mini"); lastInd = null; const i = $("#utabs .ind"); if (i) i.remove(); moveInd(); });   // where the orange pill was, so it can slide from there to the new tab
 function moveInd() {
   const nav = $("#utabs"), on = nav?.querySelector(".tabbtn.on");
   if (!on) return;
@@ -1390,13 +1398,16 @@ function drawShell() {
   }
   const me = S.status.user;
   const kk = S.status.ai;
+  const problemKey = kk?.problem ? JSON.stringify([kk.provider || "", kk.model || "", kk.problem]) : "";
+  // Observe recovery and issue changes even when Settings or a higher-priority warning hides the banner.
+  if (problemKey !== aiWarningKey) { aiWarningKey = problemKey; dismissedAIWarningKey = ""; }
   const up = S.status.update;
   let upSeen = "";
   try { upSeen = localStorage.getItem("qlipit_update_seen") || ""; } catch {}
   const upBar = up && up.latest !== upSeen ? `<div class="vb" role="status">${ic("up")}<span>${up.restart ? "<b>The new version is downloaded.</b> Close QlipIt and start it again to use it." : `A new version of QlipIt is out${up.behind ? `: <b>${up.behind} update${up.behind === 1 ? "" : "s"}</b> since yours` : ""}.`}</span>
     <button class="btn sm primary" data-act="updhow">${up.restart ? "What's new" : "How to update"}</button><button class="btn sm ghost" data-act="updlater" aria-label="Hide until the next version">Later</button></div>` : "";
   const toolBar = S.status.no_ffmpeg ? `<div class="vb" role="alert">${ic("warn")}<span><b>QlipIt can't make clips yet: ffmpeg isn't installed on this computer.</b> Open a terminal, run <code>winget install Gyan.FFmpeg</code> (Mac: <code>brew install ffmpeg</code>, Linux: <code>sudo apt install ffmpeg</code>), then close QlipIt and start it again.</span></div>` : "";
-  const aiBar = !toolBar && S.status.ai?.problem && me?.is_admin && S.view !== "settings" ? `<div class="vb" role="status">${ic("warn")}<span><b>The AI isn't answering.</b> ${esc(S.status.ai.problem)} Until then, clips are picked by loudness.</span><button class="btn sm primary" data-act="go" data-v="settings" data-tab="ai">Open AI settings</button></div>` : "";
+  const aiBar = !toolBar && aiWarningKey && aiWarningKey !== dismissedAIWarningKey && me?.is_admin && S.view !== "settings" ? `<div class="vb ai-warning" role="status">${ic("warn")}<span title="${esc(kk.problem)}"><b>AI unavailable.</b> Clips use loudness.</span><button type="button" class="btn sm" data-act="go" data-v="settings" data-tab="ai">AI settings</button><button type="button" class="icon-btn" data-act="dismissai" aria-label="Dismiss AI warning">${ic("x")}</button></div>` : "";
   const diskBar = !toolBar && S.status.disk_full && S.view !== "settings" ? `<div class="vb" role="alert">${ic("warn")}<span><b>The drive QlipIt saves to is almost full, so it can't take new videos.</b> Free up space on it, or move QlipIt's folder to a bigger drive.</span>${me?.is_admin ? `<button class="btn sm primary" data-act="go" data-v="settings" data-tab="storage">Open Storage</button>` : ""}</div>` : "";
   put($("#vbanner"), toolBar ? toolBar : diskBar ? diskBar : aiBar ? aiBar : upBar ? upBar : me && me.verified === false ? `<div class="vb" role="status">${ic("warn")}<span>Confirm your email to start clipping. We sent a link to <b>${esc(me.email)}</b>.</span><button class="btn sm" data-act="resendverify">Send a new link</button></div>`
     : kk && kk.ready === false && S.view !== "usage" ? `<div class="vb" role="status">${ic("bolt")}<span>${me?.is_admin ? "Add your AI key to let the AI pick clips and write titles. Until then, clips are picked by loudness." : "The AI isn't set up on this server yet, so clips are picked by loudness."}</span>${me?.is_admin && S.view !== "settings" ? `<button class="btn sm primary" data-act="go" data-v="settings" data-tab="ai">${ic("plus")}Add AI key</button>` : ""}</div>` : "");
@@ -1945,7 +1956,7 @@ function drawJobs() {
     list = list.filter(j => j.status !== "live"); }
   if (!list.length) {
     root.querySelectorAll("section").forEach(e => e.remove());
-    if (!$(".empty", root)) root.innerHTML = `<div class="empty"><img src="/brand/favicon.svg" alt=""><b>${cid ? "No clips for this creator yet" : "No videos yet"}</b>${cid ? "Start recording their stream, or paste a link to one of their videos above." : "Paste a link above and the studio will find the best moments and turn them into clips."}</div>`;
+    if (!$(".empty", root)) root.innerHTML = `<div class="empty${cid ? "" : " brand-empty"}"><img src="${cid ? "/brand/favicon.svg?v=dc767801" : "/brand/icon-192.png?v=dc767801"}" alt=""><b>${cid ? "No clips for this creator yet" : "No videos yet"}</b>${cid ? "Start recording their stream, or paste a link to one of their videos above." : "Paste a link above and the studio will find the best moments and turn them into clips."}</div>`;
     return;
   }
   $(".empty", root)?.remove();
@@ -2019,7 +2030,7 @@ async function saveCreator(quiet) {
 function drawLog() {
   const c = creator();
   put($("#clog"), c && c.log.length ? `<div class="card"><div class="log">${c.log.map(l => `<div><time>${when(l.t)}</time><span>${esc(l.msg)}</span></div>`).join("")}</div></div>`
-    : `<div class="empty"><img src="/brand/favicon.svg" alt=""><b>Nothing has happened yet</b>Recordings and clips for this creator will be listed here.</div>`);
+    : `<div class="empty"><img src="/brand/favicon.svg?v=dc767801" alt=""><b>Nothing has happened yet</b>Recordings and clips for this creator will be listed here.</div>`);
 }
 
 
@@ -2117,7 +2128,6 @@ function nextSteps(o) {
 }
 function drawOverview() {
   const o = S.overview, box = $("#ov"); if (!o || !box) return;
-  const sum = k => o.creators.reduce((a, r) => a + r[k], 0);
   const d14 = k => (o.daily || []).reduce((a, d) => a + d[k], 0);
   const state = r => r.state === "recording" ? `<span class="pill live"><span class="dot"></span>Recording</span>` : r.state === "waiting" ? `<span class="pill warn">Waiting for live</span>` : `<span class="pill">Idle</span>`;
   const steps = nextSteps(o);
@@ -2130,41 +2140,6 @@ function drawOverview() {
     dash = $("#ov-dash");
   }
   put(dash, `
-    <!-- Executive Metrics Ribbon -->
-    <div class="metrics-strip">
-      <div class="metric-item">
-        <div class="metric-icon" style="color:var(--signal-orange)"><span class="live-dot-pulse"></span></div>
-        <div class="metric-info">
-          <b>${o.recording}</b>
-          <span>Recording now</span>
-        </div>
-      </div>
-      <div class="metric-divider"></div>
-      <div class="metric-item">
-        <div class="metric-icon" style="color:var(--ether-blue)">${ic("scissors")}</div>
-        <div class="metric-info">
-          <b>${sum("clips_today")}</b>
-          <span>Clips today</span>
-        </div>
-      </div>
-      <div class="metric-divider"></div>
-      <div class="metric-item">
-        <div class="metric-icon" style="color:var(--mint-green)">${ic("chart")}</div>
-        <div class="metric-info">
-          <b>${d14("clips")}</b>
-          <span>Clips in 14 days</span>
-        </div>
-      </div>
-      <div class="metric-divider"></div>
-      <div class="metric-item">
-        <div class="metric-icon" style="color:var(--honey-gold)">${ic("film")}</div>
-        <div class="metric-info">
-          <b>${sum("clips_total")}</b>
-          <span>Total clips</span>
-        </div>
-      </div>
-    </div>
-
     <!-- Balanced 2-Column Dashboard Grid -->
     <div class="ov-dashboard-grid">
       <!-- Left Main Column (60%): Performance & Creators -->
@@ -2193,7 +2168,7 @@ function drawOverview() {
           </div>
           ${o.creators.length ? `<div class="scroll"><table><tr><th>Creator</th><th>Status</th><th class="num">Clips today</th><th class="num">Total clips</th></tr>
           ${o.creators.map(r => `<tr><td><a class="lnk" href="#" data-act="go" data-v="c:${esc(r.id)}">${esc(r.name)}</a></td><td>${state(r)}</td><td class="num">${r.clips_today}</td><td class="num">${r.clips_total}</td></tr>`).join("")}</table></div>`
-              : `<div class="empty"><img src="/brand/icon-192.png" alt="QlipIt"><b>No creators yet</b>Add one to give each streamer their own workspace.</div>`}
+              : `<div class="empty brand-empty"><img src="/brand/icon-192.png?v=dc767801" alt="QlipIt" width="80" height="80"><b>No creators yet</b>Add one to give each streamer their own workspace.</div>`}
         </div>
       </div>
 
@@ -2255,7 +2230,7 @@ function drawOverview() {
 /* ============================================================ AI usage */
 async function loadUsage() {
   try { S.usage = await api("/api/usage"); } catch { return; }
-  S.status.ai = {...S.status.ai, ready: S.usage.ready, provider: S.usage.provider, model: S.usage.model, today_calls: S.usage.today_calls, today_tokens: S.usage.today_tokens};
+  S.status.ai = {...S.status.ai, ready: S.usage.ready, provider: S.usage.provider, model: S.usage.model, problem: S.usage.problem, today_calls: S.usage.today_calls, today_tokens: S.usage.today_tokens};
   drawShell(); drawUsage();
 }
 function tokenChart(daily) {
@@ -2938,8 +2913,13 @@ document.addEventListener("click", async e => {
       } finally { b.disabled = false; }
       return;
     }
+    if (a === "dismissai") {
+      if (!b.closest(".ai-warning") || !$("#vbanner").contains(b)) return;
+      dismissedAIWarningKey = aiWarningKey;
+      drawShell(); $("#topbarAiPill")?.focus({preventScroll:true}); return;
+    }
     if (a === "menu") return $("#app").classList.toggle("open");
-    if (a === "collapse") { const m = $("#app").classList.toggle("mini"); try { localStorage.setItem("mini", m ? "1" : ""); } catch {} return; }
+    if (a === "collapse") { if (innerWidth > 900) return; const m = $("#app").classList.toggle("mini"); try { localStorage.setItem("mini", m ? "1" : ""); } catch {} return; }
     if (a === "toggleopts") {
       const p = $(".composer-opts"), open = !p.classList.contains("open");
       p.classList.toggle("open", open);
@@ -3349,8 +3329,8 @@ document.addEventListener("click", async e => {
   } catch (err) { b.disabled = false; toast(err.message, "bad"); }
 });
 
-// permanently open sidebar
-try { if (localStorage.getItem("mini")) $("#app").classList.add("mini"); } catch {}
+// The desktop sidebar stays open, even if an older page saved a collapsed preference.
+try { if (innerWidth <= 900 && localStorage.getItem("mini")) $("#app").classList.add("mini"); } catch {}
 $("#main").addEventListener("scroll", () => $(".topbar").classList.toggle("stuck", $("#main").scrollTop > 4), {passive:true});
 (async () => {
   try { S.status = await api("/api/status"); } catch {}

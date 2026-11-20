@@ -86,10 +86,15 @@ def main() -> int:
                 ("the storage folder: full drive, open, move", ["tests/test_storage.py"]),
                 ("state machines and transitions", ["tests/test_states.py"]),
                 ("voiceover and AI script studio", ["tests/test_voice.py"]),
-                ("the Windows launcher: where it keeps things, picking a port", ["tests/test_desktop.py"])]
+                ("the Windows launcher: where it keeps things, picking a port", ["tests/test_desktop.py"]),
+                ("Homepage layout and AI warnings", ["tests/test_homepage.js"])]
         for name, args in runs:
             print(f"\n=== {name} ===", flush=True)
-            r = subprocess.run([sys.executable, *args], cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            runner = shutil.which("node") if args[0].endswith(".js") else sys.executable
+            if not runner:
+                print("  SKIP Homepage JavaScript checks (Node.js is not installed)", flush=True)
+                continue
+            r = subprocess.run([runner, *args], cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
             lines = (r.stdout + r.stderr).splitlines()
             passed = sum(1 for x in lines if x.startswith("PASS"))
             for x in lines:
