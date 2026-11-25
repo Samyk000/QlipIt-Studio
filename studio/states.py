@@ -9,7 +9,8 @@ except ImportError:
     from enum import Enum
 
     class StrEnum(str, Enum):
-        pass
+        def __str__(self):
+            return self.value
 
 from typing import Any
 
@@ -62,6 +63,23 @@ class ClipStatus(StrEnum):
     RENDERING = "rendering"
     DONE = "done"
     ERROR = "error"
+
+
+class AttemptStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
+
+
+class Outcome(StrEnum):
+    SUCCESS = "success"
+    PARTIAL = "partial"
+    EMPTY = "empty"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 CLIP_TRANSITIONS: dict[str, set[str]] = {
@@ -131,14 +149,16 @@ def validate_transition(entity: str, current: str, target: str, allowed_map: dic
 def transition_job_status(job: dict[str, Any], target: str) -> str:
     """Safely transitions a job's status."""
     current = job.get("status", JobStatus.QUEUED)
-    validate_transition(f"Job {job.get('id', '')}", str(current), str(target), JOB_TRANSITIONS)
-    job["status"] = str(target)
-    return str(target)
+    current, target = getattr(current, "value", current), getattr(target, "value", target)
+    validate_transition(f"Job {job.get('id', '')}", current, target, JOB_TRANSITIONS)
+    job["status"] = target
+    return target
 
 
 def transition_clip_status(clip: dict[str, Any], target: str) -> str:
     """Safely transitions a clip's status."""
     current = clip.get("status", ClipStatus.QUEUED)
-    validate_transition(f"Clip {clip.get('id', '')}", str(current), str(target), CLIP_TRANSITIONS)
-    clip["status"] = str(target)
-    return str(target)
+    current, target = getattr(current, "value", current), getattr(target, "value", target)
+    validate_transition(f"Clip {clip.get('id', '')}", current, target, CLIP_TRANSITIONS)
+    clip["status"] = target
+    return target

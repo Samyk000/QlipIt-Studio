@@ -7,6 +7,7 @@ another's."""
 import collections
 import contextlib
 import contextvars
+import threading
 
 _uid = contextvars.ContextVar("qlipit_uid", default=None)
 
@@ -58,13 +59,16 @@ def bind(fn):
 # The page sends back the number it last saw; if it is the same, the server answers "nothing new" without
 # touching the disk or building anything. With many people online this is what keeps the page checks cheap.
 _ver = collections.defaultdict(int)
+_ver_lock = threading.Lock()
 
 
 def bump(u=None):
     u = u or _uid.get()
     if u:
-        _ver[u] += 1
+        with _ver_lock:
+            _ver[u] += 1
 
 
 def version(u=None) -> int:
-    return _ver[u or uid()]
+    with _ver_lock:
+        return _ver[u or uid()]

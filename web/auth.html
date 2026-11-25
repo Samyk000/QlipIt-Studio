@@ -2,37 +2,154 @@
 <html lang="en">
 
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in to QlipIt</title>
-<meta name="description" content="Sign in or create your QlipIt account.">
-<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg?v=dc767801">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-:root{--brand:#7952FF;--brand-hi:#9270FF;--ink:#0B0D11;--soft:#1E1635;--line-b:#2D254D;--deep:#5E35EB;
-  --frame:#0B0D11;--frame-2:#141722;--frame-text:#F4EEEA;--frame-dim:#A99A91;
-  --muted:#0F121B;--line:#1C2130;--line-2:#282E42;--text:#F3F4F6;--dim:#9CA3AF;--faint:#6B7280;--bad:#FF4D4D;--bad-soft:#2A1417;
-  --r-lg:16px;--r:12px;--r-sm:8px;color-scheme:dark}
-*{box-sizing:border-box}
-[hidden]{display:none!important}
-html{scroll-behavior:smooth}
-body{margin:0;background:#fff;color:var(--text);font:16px/1.55 "Geist","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-h1,h2,h3,p{margin:0}
-a{color:inherit}
-svg{width:18px;height:18px;flex:none;fill:currentColor}
-:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 20px;border-radius:var(--r);border:1px solid var(--line-2);background:#fff;color:var(--text);
-  font:inherit;font-weight:600;font-size:15px;cursor:pointer;text-decoration:none;white-space:nowrap;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
-.btn:hover{background:var(--muted);border-color:#D4CAC3}
-.btn.primary{background:var(--brand);border-color:var(--brand);color:#FFFFFF !important}
-.btn.primary:hover{background:var(--brand-hi);border-color:var(--brand-hi)}
-.btn.dark{background:var(--ink);border-color:var(--ink);color:#fff}.btn.dark:hover{background:#3A2C25;border-color:#3A2C25}
-.btn.sm{height:38px;padding:0 14px;font-size:14px}
-.btn.lg{height:52px;padding:0 26px;font-size:16px}
-.btn:disabled{opacity:.5;cursor:default}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in to QlipIt</title>
+  <meta name="description" content="Sign in or create your QlipIt account.">
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg?v=dc767801">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --brand: #7952FF;
+      --brand-hi: #9270FF;
+      --ink: #0B0D11;
+      --soft: #1E1635;
+      --line-b: #2D254D;
+      --deep: #5E35EB;
+      --frame: #0B0D11;
+      --frame-2: #141722;
+      --frame-text: #F4EEEA;
+      --frame-dim: #A99A91;
+      --muted: #0F121B;
+      --line: #1C2130;
+      --line-2: #282E42;
+      --text: #F3F4F6;
+      --dim: #9CA3AF;
+      --faint: #6B7280;
+      --bad: #FF4D4D;
+      --bad-soft: #2A1417;
+      --r-lg: 16px;
+      --r: 12px;
+      --r-sm: 8px;
+      color-scheme: dark
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    [hidden] {
+      display: none !important
+    }
+
+    html {
+      scroll-behavior: smooth
+    }
+
+    body {
+      margin: 0;
+      background: #fff;
+      color: var(--text);
+      font: 16px/1.55 "Geist", "Segoe UI", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0
+    }
+
+    a {
+      color: inherit
+    }
+
+    svg {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      fill: currentColor
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 44px;
+      padding: 0 20px;
+      border-radius: var(--r);
+      border: 1px solid var(--line-2);
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: background-color .15s ease, border-color .15s ease, color .15s ease
+    }
+
+    .btn:hover {
+      background: var(--muted);
+      border-color: #D4CAC3
+    }
+
+    .btn.primary {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #FFFFFF !important
+    }
+
+    .btn.primary:hover {
+      background: var(--brand-hi);
+      border-color: var(--brand-hi)
+    }
+
+    .btn.dark {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: #fff
+    }
+
+    .btn.dark:hover {
+      background: #3A2C25;
+      border-color: #3A2C25
+    }
+
+    .btn.sm {
+      height: 38px;
+      padding: 0 14px;
+      font-size: 14px
+    }
+
+    .btn.lg {
+      height: 52px;
+      padding: 0 26px;
+      font-size: 16px
+    }
+
+    .btn:disabled {
+      opacity: .5;
+      cursor: default
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+      * {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important
+      }
+    }
 
     * {
       box-sizing: border-box

@@ -6,7 +6,7 @@ const vm = require("node:vm");
 
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-const boot = script.lastIndexOf("\n(async () => {");
+const boot = [...script.matchAll(/\n\s*\(async \(\) => \{/g)].pop()?.index ?? -1;
 assert.ok(boot > 0, "the network bootstrap must be excluded from offline tests");
 
 function page(width = 1440, savedMini = "1") {
@@ -56,7 +56,7 @@ function page(width = 1440, savedMini = "1") {
   }
   for (const id of ["app", "main", "clipdlg", "file", "bellpop", "bellBtn", "bellDot",
                     "nav", "foot", "topbarAiPill", "tpic", "utabs", "title", "subtitle", "actions",
-                    "view", "ov", "ov-hero", "ov-dash", "usage", "jobs", "selbar", "vbanner"]) nodes.set("#" + id, node());
+                    "view", "ov", "ov-hero", "ov-dash", "ov-recent", "usage", "jobs", "sform", "selbar", "vbanner"]) nodes.set("#" + id, node());
   nodes.set(".topbar", node());
   const window = {addEventListener: (name, fn) => {
     const key = "window:" + name;
@@ -144,23 +144,27 @@ async function check(name, test) {
     await p.dispatch("document:click", event);
     assert.equal(p.nodes.get("#app").classList.contains("open"), false);
   });
-  await check("Homepage omits the summary strip but keeps its dashboard and chart total", () => {
+  await check("Homepage renders composer and Recent clips without old dashboard widgets", () => {
     const p = page();
-    p.state.creators = [{id: "creator-1", name: "Example", auto_watch: true}];
-    p.state.overview = {
-      recording: 1,
-      creators: [{id: "creator-1", name: "Example", state: "recording", clips_today: 2, clips_total: 9}],
-      daily: [{day: "2026-11-18", clips: 3}, {day: "2026-11-19", clips: 4}],
-    };
+    p.state.creators = [{id: "creator-1", name: "Example"}];
+    p.state.jobs = [{
+      id: "job-1", creator: "creator-1", created: 1000,
+      clips: [
+        {id: "clip-1", status: "done", file: "clip1.mp4", made_at: 1010, hook: "First Clip", title: "Clip 1"},
+        {id: "clip-2", status: "done", file: "clip2.mp4", made_at: 1020, hook: "Second Clip", title: "Clip 2"},
+      ]
+    }];
     const hero = p.nodes.get("#ov-hero");
     hero.innerHTML = "existing composer";
     p.run("drawOverview()");
-    const dashboard = p.nodes.get("#ov-dash").innerHTML;
-    assert.equal(dashboard.includes('class="metrics-strip"'), false, "Homepage has no summary strip");
+    const recent = (p.nodes.get("#ov-recent") || p.nodes.get("#ov-dash")).innerHTML;
+    assert.equal(recent.includes('class="metrics-strip"'), false, "Homepage has no summary strip");
     for (const text of ["Clip activity", "Creators Fleet", "AI INTELLIGENCE", "NEURAL SPEECH ENGINE", "Next steps"])
-      assert.ok(dashboard.includes(text), text + " stays on Homepage");
-    assert.match(dashboard, /<b>7<\/b><span>Clips made<\/span>/);
-    assert.match(dashboard, /Clips made per day, last 14 days/);
+      assert.equal(recent.includes(text), false, text + " is removed from Homepage");
+    assert.ok(recent.includes("Recent clips"), "Recent clips heading is rendered");
+    assert.ok(recent.includes("Second Clip"), "Clips are rendered");
+    assert.ok(recent.indexOf("Second Clip") < recent.indexOf("First Clip"), "Newest clip appears first");
+    assert.ok(recent.includes('data-v="library"'), "View all links to All videos");
     assert.equal(hero.innerHTML, "existing composer");
   });
   await check("Usage keeps its shared metrics strip", () => {
@@ -173,24 +177,46 @@ async function check(name, test) {
     for (const text of ["Calls today", "Tokens today", "Calls total", "Tokens total"])
       assert.ok(usage.includes(text), text + " stays on Usage");
   });
-  await check("sidebar uses the full logo at 80px with STUDIO, without duplicate QlipIt text", () => {
+  await check("sidebar keeps the compact 80 by 45px logo with STUDIO, without duplicate QlipIt text", () => {
     const brand = html.match(/<a href="\/" class="brand-link"[\s\S]*?<\/a>/)[0];
     assert.equal(brand.includes('class="brand-name"'), false, "the image already contains the wordmark");
     assert.ok(brand.includes('class="brand-badge">STUDIO</span>'));
-    assert.match(html, /\.brand-icon\{[^}]*width:80px;height:80px;[^}]*object-fit:contain/);
+    assert.match(html, /\.brand-icon\s*\{[^}]*width:\s*80px;\s*height:\s*45px;[^}]*object-fit:\s*contain/);
   });
-  await check("Home and All videos use the 80px logo only in their main empty states", () => {
+  await check("Home uses compact empty state and All videos keeps brand empty state", () => {
     const p = page();
-    p.state.overview = {creators: [], daily: []};
+    p.state.creators = [];
+    p.state.jobs = [];
     p.run("drawOverview()");
-    assert.ok(p.nodes.get("#ov-dash").innerHTML.includes('class="empty brand-empty"'), "Home logo is sized for its empty state");
+    const homeHtml = (p.nodes.get("#ov-recent") || p.nodes.get("#ov-dash")).innerHTML;
+    assert.ok(homeHtml.includes('class="ov-empty"'), "Home uses compact ov-empty state");
+    assert.equal(homeHtml.includes("brand-empty"), false, "Home does not use the giant brand logo");
+    assert.ok(homeHtml.includes("No clips yet"), "Home indicates no clips");
+    assert.ok(homeHtml.includes("Add your first creator"), "Prompts to add creator when empty");
     p.state.view = "library";
     p.run("drawJobs()");
     assert.ok(p.nodes.get("#jobs").innerHTML.includes('class="empty brand-empty"'), "All videos logo is sized for its empty state");
-    assert.match(html, /\.empty\.brand-empty img\{width:80px;height:80px;object-fit:contain/);
+    assert.match(html, /\.empty\.brand-empty img\s*\{\s*width:\s*80px;\s*height:\s*80px;\s*object-fit:\s*contain/);
     p.state.view = "c:example";
     p.run("drawJobs()");
     assert.equal(p.nodes.get("#jobs").innerHTML.includes("brand-empty"), false, "creator empty states are not restyled");
+  });
+  await check("Settings renders single-column layout without duplicate title or side nav", async () => {
+    const p = page();
+    p.state.status = {
+      accounts: true,
+      user: {is_admin: true, email: "user@example.com", name: "User", verified: true, has_password: true},
+    };
+    p.state.ai = {ready: true, provider: "gemini", label: "Gemini", models: ["gemini-2.5-flash"], providers: [{id: "gemini", label: "Gemini"}]};
+    p.state.stor = {path: "C:\\QlipIt", total_gb: 500, free_gb: 42, used_gb: 12, drive: "C:"};
+    await p.run("drawSettings()");
+    const settingsHtml = p.nodes.get("#sform").innerHTML;
+    assert.equal(settingsHtml.includes('class="set-nav"'), false, "no side navigation rail");
+    assert.equal(settingsHtml.includes("Configure AI models, local storage, and your account preferences."), false, "no duplicate subtitle");
+    assert.ok(settingsHtml.includes('id="set-ai"'), "AI section rendered");
+    assert.ok(settingsHtml.includes('id="set-account"'), "Account section rendered");
+    assert.ok(settingsHtml.includes('id="set-storage"'), "Storage section rendered");
+    assert.ok(settingsHtml.includes('id="set-danger"'), "Danger Zone rendered");
   });
   for (const problem of [quota, unavailable]) {
     await check(`${problem === quota ? "credit-limit" : "unavailable-model"} warning is compact, escaped, and accessible`, () => {

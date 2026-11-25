@@ -79,8 +79,9 @@ took = time.time() - t0
 check("the video stops waiting for a clip that hangs", took < 10)
 check("the hung clip is marked as failed, with what to do", (clips[1]["status"], "re-make" in clips[1].get("error", "")), ("error", True))
 check("every other clip is finished", [c["status"] for c in clips if c["id"] != "clip02"], ["done", "done", "done"])
-check("the last step says which clip it is on and the bar moves",
-      job.get("stage", "").startswith("Making clip ") and job.get("progress", 0) > 0.92)
+check("the last step reports completed clip units, not a manufactured 92 percent",
+      job.get("stage", "").startswith("Making clip ") and job.get("progress_detail", {}).get("completed") == 4
+      and job.get("progress_detail", {}).get("total") == 4)
 release.set(); pool.shutdown(wait=True)
 
 # ---- and the person who started it can stop it

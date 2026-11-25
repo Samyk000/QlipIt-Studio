@@ -1,9 +1,14 @@
 """Getting video in: link download, probing, audio extraction, loudness."""
 import contextlib
 import json
+import math
+import queue
 import re
 import subprocess
+import threading
 import time
+from collections import deque
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -77,8 +82,6 @@ def site_allowed(url: str) -> bool:
     return u.scheme in ("http", "https") and any(host == s or host.endswith("." + s) for s in config.ALLOWED_SITES)
 
 
-import threading
-
 _JOB_PROCS: dict = {}
 _PROCS_LOCK = threading.Lock()
 
@@ -96,6 +99,8 @@ def unregister_proc(jid: str, proc):
     with _PROCS_LOCK:
         if str(jid) in _JOB_PROCS:
             _JOB_PROCS[str(jid)].discard(proc)
+            if not _JOB_PROCS[str(jid)]:
+                _JOB_PROCS.pop(str(jid))
 
 
 def kill_job_procs(jid: str):
@@ -104,28 +109,147 @@ def kill_job_procs(jid: str):
     with _PROCS_LOCK:
         procs = _JOB_PROCS.pop(str(jid), set())
     for p in procs:
+        _kill_reap(p)
+
+
+def _kill_reap(p):
+    with contextlib.suppress(OSError):
+        p.kill()
+    with contextlib.suppress(OSError):
+        p.wait(timeout=5)
+
+
+class ProcessFailed(RuntimeError):
+    """A completed command failed; cancellation and timeout must not trigger encoder fallback."""
+
+
+def report_progress(callback, phase, completed=None, total=None, unit=None, phase_attempt=1):
+    if callback:
         try:
-            p.kill()
-        except Exception:
+            callback(phase=phase, completed=completed, total=total, unit=unit, phase_attempt=phase_attempt)
+        except Exception:  # a display/log callback must never invalidate an otherwise successful render
             pass
 
 
-def run(cmd, cwd=None, timeout=3600, jid=None):
-    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+def _ffmpeg_seconds(fields):
+    for key in ("out_time_us", "out_time_ms", "out_time"):
+        try:
+            value = fields[key]
+            if key == "out_time":
+                h, m, s = value.split(":")
+                value = float(h) * 3600 + float(m) * 60 + float(s)
+            else:
+                # FFmpeg's historical out_time_ms is microseconds too, despite its name.
+                value = float(value) / 1_000_000
+            if math.isfinite(value) and value >= 0:
+                return value
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def run(cmd, cwd=None, timeout=3600, jid=None, cancel=None, on_progress=None, duration=None,
+        phase="media", phase_attempt=1):
+    """Drain both pipes, report measured FFmpeg seconds, and always reap stopped children."""
+    if cancel:
+        cancel()
+    total = float(duration) if duration is not None else None
+    if total is not None and (not math.isfinite(total) or total <= 0):
+        raise ValueError("Progress duration must be positive and finite.")
+    command = list(cmd)
+    measured = on_progress is not None
+    if measured and Path(str(command[0])).stem.lower() == "ffmpeg" and "-progress" not in command:
+        command[1:1] = ["-nostats", "-progress", "pipe:1"]
+    report_progress(on_progress, phase, 0.0 if total is not None else None, total,
+                    "seconds" if total is not None else None, phase_attempt)
+    p = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
-    if jid:
-        register_proc(jid, p)
+    register_proc(jid, p)
+    stderr = deque(maxlen=8)       # at most 32 KiB, even when FFmpeg prints without newlines
+    stdout = deque(maxlen=8) if measured else []
+    updates = queue.Queue(maxsize=64)
+
+    def read_stderr():
+        try:
+            while True:
+                chunk = p.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr.append(chunk)
+        except (OSError, ValueError):
+            pass
+
+    def read_stdout():
+        fields = {}
+        try:
+            while True:
+                chunk = p.stdout.readline(4096) if measured else p.stdout.read(4096)
+                if not chunk:
+                    break
+                stdout.append(chunk)
+                if measured:
+                    key, sep, value = chunk.strip().partition("=")
+                    if sep and key in ("out_time_us", "out_time_ms", "out_time"):
+                        fields[key] = value
+                    if key == "progress":
+                        seconds = _ffmpeg_seconds(fields)
+                        fields.clear()
+                        if seconds is not None:
+                            if updates.full():
+                                with contextlib.suppress(queue.Empty):
+                                    updates.get_nowait()
+                            updates.put_nowait(seconds)
+        except (OSError, ValueError):
+            pass
+
+    readers = [threading.Thread(target=read_stdout, daemon=True), threading.Thread(target=read_stderr, daemon=True)]
+    last = -1.0
+
+    def advance():
+        nonlocal last
+        while True:
+            try:
+                seconds = updates.get_nowait()
+            except queue.Empty:
+                break
+            if total is not None:
+                seconds = min(total, seconds)
+            if seconds > last:
+                last = seconds
+                report_progress(on_progress, phase, seconds, total, "seconds", phase_attempt)
+
     try:
-        stdout, stderr = p.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        raise RuntimeError(f"{Path(str(cmd[0])).name} took too long and was stopped.")
+        for reader in readers:
+            reader.start()
+        began = time.monotonic()
+        while True:
+            if cancel:
+                cancel()
+            if timeout is not None and time.monotonic() - began >= timeout:
+                raise RuntimeError(f"{Path(str(cmd[0])).name} took too long and was stopped.")
+            advance()
+            try:
+                p.wait(timeout=0.05)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        for reader in readers:
+            reader.join(timeout=2)
+        advance()
+        if cancel:
+            cancel()
+        if p.returncode != 0:
+            raise ProcessFailed(f"{Path(str(cmd[0])).name} failed: {''.join(stderr)[-1500:]}")
+        return "".join(stdout)
     finally:
-        if jid:
-            unregister_proc(jid, p)
-    if p.returncode != 0:
-        raise RuntimeError(f"{Path(str(cmd[0])).name} failed: {stderr[-1500:]}")
-    return stdout
+        if p.poll() is None:
+            _kill_reap(p)
+        for reader in readers:
+            if reader.ident is not None:
+                reader.join(timeout=2)
+        p.stdout.close()
+        p.stderr.close()
+        unregister_proc(jid, p)
 
 
 class _Quiet:
@@ -180,7 +304,7 @@ def youtube_words(url: str):
         if not track:
             return None
         raw = ydl.urlopen(track["url"]).read(40_000_000)
-    return _caption_words(json.loads(raw)), key.replace("-orig", "")
+    return _caption_words(json.loads(raw), source_end=float(i.get("duration") or 0) or None), key.replace("-orig", "")
 
 
 def youtube_english_words(url: str):
@@ -199,30 +323,74 @@ def youtube_english_words(url: str):
         if not track:
             return None
         raw = ydl.urlopen(track["url"]).read(40_000_000)
-    words = _caption_words(json.loads(raw))
+    words = _caption_words(json.loads(raw), source_end=float(i.get("duration") or 0) or None)
     return words or None
 
 
-def _caption_words(data: dict) -> list:
-    out = []
-    for ev in data.get("events") or []:
-        segs = [x for x in ev.get("segs") or [] if (x.get("utf8") or "").strip()]
-        if not segs:
+def _caption_words(data: dict, source_end=None) -> list:
+    """Expand segment text within its own interval; interpolated timings are explicitly approximate."""
+    if source_end is not None and (isinstance(source_end, bool) or not isinstance(source_end, (int, float))
+                                   or not math.isfinite(source_end) or source_end < 0):
+        raise ValueError("Caption source end must be finite and nonnegative.")
+
+    def seconds(value):
+        try:
+            value = float(value or 0) / 1000
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) and value >= 0 else None
+
+    events = []
+    raw = data.get("events") if isinstance(data, dict) else None
+    for ev in raw if isinstance(raw, list) else []:
+        if not isinstance(ev, dict):
             continue
-        t0, dur = float(ev.get("tStartMs") or 0), float(ev.get("dDurationMs") or 0)
-        timed = len(segs) > 1 or "tOffsetMs" in segs[0]
-        for x in segs:
-            parts = x["utf8"].split()
+        start, duration = seconds(ev.get("tStartMs")), seconds(ev.get("dDurationMs"))
+        if start is not None and duration is not None:
+            events.append((start, duration, ev))
+    events.sort(key=lambda ev: ev[0])
+    out = []
+    for index, (t0, dur, ev) in enumerate(events):
+        segments = {}
+        raw = ev.get("segs")
+        for x in raw if isinstance(raw, list) else []:
+            if not isinstance(x, dict) or not isinstance(x.get("utf8"), str):
+                continue
+            text, offset = x["utf8"].strip(), seconds(x.get("tOffsetMs"))
+            if offset is None or not text or re.fullmatch(r"[\[(].*[\])]", text):
+                continue
+            parts = [w for w in text.split() if not re.fullmatch(r"[\[(].*[\])]", w) and w not in ("[", "]", "__")]
+            group = segments.setdefault(offset, {"parts": [], "timed": False})
+            group["parts"].extend(parts)
+            group["timed"] |= "tOffsetMs" in x
+        offsets = sorted(segments)
+        if not offsets:
+            continue
+        if dur <= 0:
+            next_start = next((start for start, _, _ in events[index + 1:] if start > t0), None)
+            event_end = next_start if next_start is not None else t0 + max(offsets) + 0.4
+        else:
+            event_end = t0 + dur
+        if source_end is not None:
+            event_end = min(event_end, source_end)
+        for i, offset in enumerate(offsets):
+            group = segments[offset]
+            parts, at = group["parts"], t0 + offset
+            until = min(event_end, t0 + offsets[i + 1] if i + 1 < len(offsets) else event_end)
+            if until <= at or not parts:
+                continue
+            step = (until - at) / len(parts)
             for n, w in enumerate(parts):
-                if re.fullmatch(r"[\[(].*[\])]", w) or w in ("[", "]", "__"):
-                    continue                      # [Music], [Applause], and words YouTube blanked out
-                # a line with no word timings: its words are spread evenly over the time the line was on screen
-                at = t0 + float(x.get("tOffsetMs") or 0) if timed else t0 + dur * n / max(1, len(parts))
-                out.append({"w": w, "s": round(at / 1000, 2)})
+                start = at + n * step
+                stop = min(until, at + (n + 1) * step, start + 0.6)
+                out.append({"w": w, "s": start, "e": stop,
+                            "timing": "json3" if group["timed"] and len(parts) == 1 else "approximate"})
     out.sort(key=lambda w: w["s"])
     for n, w in enumerate(out):
         nxt = out[n + 1]["s"] if n + 1 < len(out) else w["s"] + 0.4
-        w["e"] = round(max(w["s"] + 0.08, min(nxt, w["s"] + 0.6)), 2)
+        bound = source_end if source_end is not None else float("inf")
+        w["s"] = min(bound, round(w["s"], 6))
+        w["e"] = max(w["s"], min(bound, nxt, round(w["e"], 6)))
     return out
 
 
@@ -282,59 +450,113 @@ def save_thumb(job_dir: Path, url: str = "", video: Path = None) -> bool:
     return False
 
 
-def download_audio(url: str, job_dir: Path, on_progress=None) -> Path:
-    """Audio only: a few seconds even for long videos, and all the AI needs to pick clips."""
-    def hook(d):
-        total = d.get("total_bytes") or d.get("total_bytes_estimate")
-        if on_progress and d.get("status") == "downloading" and total:
-            on_progress(d.get("downloaded_bytes", 0) / total)
+def _download_hook(cancel, on_progress=None, *, legacy=False, phase_attempt=1):
+    last, filename = 0, None
 
+    def hook(d):
+        nonlocal last, filename, phase_attempt
+        if cancel:
+            cancel()
+        if d.get("filename") and filename != d["filename"]:
+            if filename is not None:
+                phase_attempt += 1
+            filename, last = d["filename"], 0
+        total = d.get("total_bytes") or d.get("total_bytes_estimate")
+        if d.get("status") == "downloading":
+            last = max(last, d.get("downloaded_bytes") or 0)
+            if legacy:
+                if on_progress and total:
+                    try:
+                        on_progress(last / total)
+                    except Exception:
+                        pass
+            else:
+                report_progress(on_progress, "download", last, total, "bytes", phase_attempt)
+        if cancel:
+            cancel()
+    return hook
+
+
+def download_audio(url: str, job_dir: Path, on_progress=None, *, jid=None, cancel=None) -> Path:
+    """Audio only: a few seconds even for long videos, and all the AI needs to pick clips."""
+    if cancel:
+        cancel()
+    hook = _download_hook(cancel, on_progress, legacy=True)
     with _youtube_guard(url), _ydl({"format": "ba[ext=m4a]/ba/worst", "outtmpl": str(job_dir / "audio_src.%(ext)s"),
-               "progress_hooks": [hook]}) as ydl:
+                                  "progress_hooks": [hook], "postprocessor_hooks": [hook]}) as ydl:
         ydl.download([url])
+    if cancel:
+        cancel()
     return _biggest(job_dir, "audio_src")
 
 
-def download(url: str, job_dir: Path, height=720) -> Path:
+def download(url: str, job_dir: Path, height=720, *, jid=None, cancel=None, on_progress=None) -> Path:
     """The whole video. Used for shorter videos, where this is quicker than fetching pieces."""
+    if cancel:
+        cancel()
+    hook = _download_hook(cancel, on_progress)
+    report_progress(on_progress, "download")
     with _youtube_guard(url), _ydl({"format": _video_format(height), "merge_output_format": "mp4",
-                                    "outtmpl": str(job_dir / "source.%(ext)s")}) as ydl:
+                                  "outtmpl": str(job_dir / "source.%(ext)s"),
+                                  "progress_hooks": [hook], "postprocessor_hooks": [hook]}) as ydl:
         ydl.download([url])
+    if cancel:
+        cancel()
     return _biggest(job_dir, "source")
 
 
-def download_section(url: str, out_dir: Path, stem: str, start: float, end: float, height=720) -> Path:
+def download_section(url: str, out_dir: Path, stem: str, start: float, end: float, height=720,
+                     *, jid=None, cancel=None, on_progress=None) -> Path:
     """Just one stretch of the video. The cut lands on a keyframe, so find_offset() pins the true start.
 
     A stretch cut out of YouTube's HLS stream comes back with the sound only (a known yt-dlp limit), so the
     piece is checked before it is used and fetched again as one plain file if it has no picture."""
+    if cancel:
+        cancel()
     out_dir.mkdir(parents=True, exist_ok=True)
     why = None
-    for fmt in (_video_format(height), f"b[height<={height}]/b"):
+    extras = {key: val for key, val in {"jid": jid, "cancel": cancel, "on_progress": on_progress}.items() if val is not None}
+    for attempt, fmt in enumerate((_video_format(height), f"b[height<={height}]/b"), 1):
+        if cancel:
+            cancel()
         for p in out_dir.glob(stem + ".*"):
+            if cancel:
+                cancel()
             p.unlink(missing_ok=True)                 # a half file from the last try would be picked up instead
         try:
-            _section(url, out_dir, stem, start, end, fmt)
+            _section(url, out_dir, stem, start, end, fmt, **({**extras, "phase_attempt": attempt} if extras else {}))
+            if cancel:
+                cancel()
             got = _biggest(out_dir, stem)
-            if _has_video(got):
+            if _has_video(got, **{key: val for key, val in {"jid": jid, "cancel": cancel}.items() if val is not None}):
                 return got
             why = "it came back without a picture"
         except Exception as e:  # noqa: BLE001 - the second format is the retry
+            if cancel:
+                cancel()
             why = str(e)
     raise RuntimeError(why or "no file was produced")
 
 
-def _section(url: str, out_dir: Path, stem: str, start: float, end: float, fmt: str):
+def _section(url: str, out_dir: Path, stem: str, start: float, end: float, fmt: str,
+             *, jid=None, cancel=None, on_progress=None, phase_attempt=1):
     from yt_dlp.utils import download_range_func
+    if cancel:
+        cancel()
+    hook = _download_hook(cancel, on_progress, phase_attempt=phase_attempt)
+    report_progress(on_progress, "download", phase_attempt=phase_attempt)
     with _youtube_guard(url), _ydl({"format": fmt, "merge_output_format": "mp4",
-                                    "extractor_args": {"youtube": {"skip": ["hls"]}}, "format_sort": ["proto:https"],
-                                    "outtmpl": str(out_dir / (stem + ".%(ext)s")),
-                                    "download_ranges": download_range_func(None, [(max(0.0, start), end)])}) as ydl:
+                                  "extractor_args": {"youtube": {"skip": ["hls"]}}, "format_sort": ["proto:https"],
+                                  "outtmpl": str(out_dir / (stem + ".%(ext)s")),
+                                  "progress_hooks": [hook], "postprocessor_hooks": [hook],
+                                  "download_ranges": download_range_func(None, [(max(0.0, start), end)])}) as ydl:
         ydl.download([url])
+    if cancel:
+        cancel()
 
 
-def _has_video(path: Path) -> bool:
-    out = run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", str(path)])
+def _has_video(path: Path, *, jid=None, cancel=None) -> bool:
+    out = run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", str(path)], jid=jid, cancel=cancel)
     return any(s["codec_type"] == "video" for s in json.loads(out)["streams"])
 
 
@@ -352,34 +574,80 @@ def find_offset(full: np.ndarray, part: np.ndarray, expected: float, search=20.0
     return (a0 + int(np.argmax(corr))) / 16000
 
 
-def probe(path: Path) -> dict:
-    out = run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)])
+def probe(path: Path, require_audio=False, *, jid=None, cancel=None) -> dict:
+    out = run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+              jid=jid, cancel=cancel)
     data = json.loads(out)
-    v = next((s for s in data["streams"] if s["codec_type"] == "video"), None)
+    streams = data.get("streams") or []
+    v = next((s for s in streams if s.get("codec_type") == "video" and not (s.get("disposition") or {}).get("attached_pic")), None)
     if not v:
         raise RuntimeError("This file has no video track.")
-    if not any(s["codec_type"] == "audio" for s in data["streams"]):
+    audio = any(s.get("codec_type") == "audio" for s in streams)
+    if require_audio and not audio:
         raise RuntimeError("This file has no audio track, so there is nothing to transcribe.")
     w, h = int(v["width"]), int(v["height"])
     if w * h > 3840 * 2160 or w < 16 or h < 16:
         raise RuntimeError("This video's resolution isn't supported (4K is the largest).")
-    rot = str((v.get("side_data_list") or [{}])[0].get("rotation", "0"))
-    if rot.lstrip("-") in ("90", "270"):
-        w, h = h, w
-    return {"width": w, "height": h, "duration": float(data["format"]["duration"])}
+    try:
+        sar = Fraction(str(v.get("sample_aspect_ratio") or "1:1").replace(":", "/"))
+        if sar <= 0:
+            sar = Fraction(1)
+    except (ValueError, ZeroDivisionError):
+        sar = Fraction(1)
+    rotation = next((x["rotation"] for x in v.get("side_data_list") or [] if "rotation" in x),
+                    (v.get("tags") or {}).get("rotate", 0))
+    try:
+        rotation = float(rotation)
+        if not math.isfinite(rotation) or abs(rotation / 90 - round(rotation / 90)) > 0.01:
+            raise ValueError
+        rotation = int(round(rotation)) % 360
+    except (ValueError, TypeError):
+        raise RuntimeError("This video's rotation isn't supported.") from None
+    dw, dh = int(round(w * sar)), h
+    if rotation in (90, 270):
+        dw, dh = dh, dw
+    if dw < 16 or dh < 16 or dw * dh > 3840 * 2160:
+        raise RuntimeError("This video's display resolution isn't supported.")
+    duration = float((data.get("format") or {}).get("duration") or v.get("duration") or 0)
+    if not math.isfinite(duration) or duration < 0:
+        raise RuntimeError("This video's duration isn't valid.")
+    return {"width": dw, "height": dh, "coded_width": w, "coded_height": h,
+            "sar": f"{sar.numerator}:{sar.denominator}", "rotation": rotation, "duration": duration,
+            "audio": audio, "codec": v.get("codec_name") or "", "pix_fmt": v.get("pix_fmt") or ""}
 
 
-def extract_audio(src: Path, wav: Path):
+def _audio_span(start, end):
+    if isinstance(start, bool) or not isinstance(start, (int, float)) or not math.isfinite(start) or start < 0:
+        raise ValueError("Audio start must be finite and nonnegative.")
+    if end is not None and (isinstance(end, bool) or not isinstance(end, (int, float)) or not math.isfinite(end) or end <= start):
+        raise ValueError("Audio end must be finite and after its start.")
+
+
+def extract_audio(src: Path, wav: Path, start=0, end=None, jid=None, cancel=None, on_progress=None):
+    _audio_span(start, end)
     # first_pts=0 pads any gap before the audio starts, so second 0 of the wav is second 0 of the file
     # -t: never more audio than the longest video allowed, whatever the file claims about itself
-    run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-t", str(int(config.MAX_VIDEO_HOURS * 3600) + 60),
-         "-af", "aresample=async=1:first_pts=0", "-c:a", "pcm_s16le", str(wav)])
+    limit = int(config.MAX_VIDEO_HOURS * 3600) + 60
+    duration = min(limit, end - start) if end is not None else None
+    cmd = ["ffmpeg", "-y", "-v", "error"]
+    if start:
+        cmd += ["-ss", str(start)]
+    run(cmd + ["-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-t", str(duration if duration is not None else limit),
+               "-af", "aresample=async=1:first_pts=0", "-c:a", "pcm_s16le", str(wav)],
+        jid=jid, cancel=cancel, on_progress=on_progress, duration=duration, phase="audio")
 
 
-def load_audio(wav: Path) -> np.ndarray:
-    data, sr = sf.read(str(wav), dtype="int16")
-    assert sr == 16000
-    return data
+def load_audio(wav: Path, start=0, end=None) -> np.ndarray:
+    _audio_span(start, end)
+    with sf.SoundFile(str(wav)) as audio:
+        if audio.samplerate != 16000 or audio.channels != 1:
+            raise ValueError("Speech audio must be mono at 16000 Hz.")
+        first = int(start * 16000)
+        if first > len(audio):
+            raise ValueError("Audio span starts beyond the available audio.")
+        audio.seek(first)
+        frames = min(len(audio), int(end * 16000)) - first if end is not None else -1
+        return audio.read(frames=frames, dtype="int16")
 
 
 def loudness_per_second(audio: np.ndarray) -> np.ndarray:

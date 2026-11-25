@@ -15,26 +15,33 @@ class Busy(Exception):
 
 
 def _busy(job) -> bool:
-    return job["status"] in ("queued", "running", "live") or job["id"] in live.SESSIONS
+    return jobs.has_active_work(job) or job["id"] in live.SESSIONS
 
 
 # ---------------------------------------------------------------- clips and videos
 def delete_clip(jid: str, cid: str) -> bool:
     """Remove one clip and its files. The video and its other clips stay."""
-    job = jobs.get(jid)
-    if not job:
-        return False
-    clip = next((c for c in job["clips"] if c["id"] == cid), None)
-    if not clip:
-        return False
-    if clip.get("status") in ("queued", "rendering"):
-        raise Busy("This clip is still being made. Wait for it to finish first.")
-    job["clips"] = [c for c in job["clips"] if c["id"] != cid]
-    jobs.save(job)
+    with jobs._lock:
+        job = jobs.get(jid)
+        if not job:
+            return False
+        clip = next((c for c in job["clips"] if c["id"] == cid), None)
+        if not clip:
+            return False
+        if jobs.has_active_work(job, clip):
+            raise Busy("This clip is still being made or its cancelled worker is cleaning up. Wait for it to finish first.")
+        allocated = [int(c["id"][4:]) for c in job["clips"] if c["id"].startswith("clip") and c["id"][4:].isdigit()]
+        job["clip_id_high_water"] = max(int(job.get("clip_id_high_water", 0)), max(allocated, default=0))
+        job["clips"] = [c for c in job["clips"] if c["id"] != cid]
+        jobs.save(job)
     d = Path(job["dir"])
     for name in (clip.get("file"), clip.get("cover"), f"{cid}.ass"):
         if name:
             (d / "clips" / Path(str(name)).name).unlink(missing_ok=True)
+    for f in (d / "clips").glob(cid + "-*"):
+        f.unlink(missing_ok=True)
+    for f in (d / "clips").glob(cid + "_vo.*"):
+        f.unlink(missing_ok=True)
     src = clip.get("src")
     if src and Path(src).is_relative_to(d):        # the piece of video fetched for this clip (root or clips/)
         Path(src).unlink(missing_ok=True)
@@ -56,6 +63,8 @@ def delete_many(job_ids: list, clip_ids: list) -> dict:
         if jobs.delete(jid):
             whole.add(jid)
             out["videos"] += 1
+        else:
+            out["skipped"] += 1
     for jid, cid in dict.fromkeys(clip_ids):
         if jid in whole:
             continue
@@ -109,11 +118,12 @@ def delete_creator(cid: str) -> dict:
         return {"ok": False}
     if live.active_for(cid):
         raise Busy("This creator is being recorded. Stop the recording first.")
-    mine = [j for j in jobs.list_jobs() if j.get("creator") == cid]
-    if any(_busy(j) for j in mine):
-        raise Busy("One of this creator's videos is still being made. Wait for it to finish first.")
-    for j in mine:
-        jobs.delete(j["id"])
+    with jobs._lock:
+        mine = [j for j in jobs.list_jobs() if j.get("creator") == cid]
+        if any(_busy(j) for j in mine):
+            raise Busy("One of this creator's videos or editor previews is still being made. Wait for it to finish first.")
+        for j in mine:
+            jobs.delete(j["id"])
     with creators._lock:
         creators._mine().pop(cid, None)
     shutil.rmtree(creators.root(cid), ignore_errors=True)
@@ -134,11 +144,12 @@ def delete_account(uid: str) -> dict:
         for s in list(live.SESSIONS.values()):
             if s.job.get("user") == uid and not s.finished:
                 raise Busy("A stream is still being recorded. Stop the recording first.")
-        mine = jobs.list_jobs()
-        if any(_busy(j) for j in mine):
-            raise Busy("A video is still being made. Wait for it to finish, then delete the account.")
-        for j in mine:
-            jobs.delete(j["id"])
+        with jobs._lock:
+            mine = jobs.list_jobs()
+            if any(_busy(j) for j in mine):
+                raise Busy("A video or editor preview is still being made. Wait for it to finish, then delete the account.")
+            for j in mine:
+                jobs.delete(j["id"])
     with db.engine.begin() as c:
         for t in reversed(db.meta.sorted_tables):
             if t.name != "users" and "user_id" in t.c:

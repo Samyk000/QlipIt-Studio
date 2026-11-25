@@ -19,10 +19,10 @@ from fastapi import FastAPI, HTTPException, Request
 from . import transcribe
 
 TOKEN = (os.environ.get("QLIPIT_ASR_TOKEN") or os.environ.get("PEAKCUT_ASR_TOKEN") or "").strip()
-PORT = int(os.environ.get("QLIPIT_ASR_PORT") or os.environ.get("PEAKCUT_ASR_PORT") or "9000")
-CARD_BATCH = int(os.environ.get("QLIPIT_ASR_BATCH") or os.environ.get("PEAKCUT_ASR_BATCH") or "16")
+PORT = transcribe._positive("QLIPIT_ASR_PORT", 9000)
+CARD_BATCH = transcribe._positive("QLIPIT_ASR_BATCH", 16)
 MAX_BODY = 64 * 1024 * 1024             # about 33 minutes of sound in one request: far more than is ever sent
-MAX_PIECE = 16000 * 40                  # a piece is 12 to 24 seconds; 40 is the ceiling
+MAX_PIECE = transcribe.MAX_PIECE        # a piece is 12 to 24 seconds; 40 is the ceiling
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 _stats = {"pieces": 0, "audio_s": 0.0, "busy_s": 0.0, "since": time.time()}
@@ -39,18 +39,37 @@ def healthz():
 
 @app.post("/decode")
 async def decode(request: Request):
-    if not TOKEN or not hmac.compare_digest(request.headers.get("authorization", ""), "Bearer " + TOKEN):
+    authorization = request.headers.get("authorization", "")
+    if (not TOKEN or not isinstance(authorization, str)
+            or not hmac.compare_digest(authorization.encode("utf-8"), ("Bearer " + TOKEN).encode("utf-8"))):
         raise HTTPException(401, "no")
     try:
-        lens = [int(x) for x in request.headers.get("x-lens", "").split(",") if x]
+        raw_lens = request.headers.get("x-lens", "")
+        if len(raw_lens) > 4096:
+            raise ValueError("oversized lengths")
+        lens = [int(x) for x in raw_lens.split(",")]
+        rate = int(request.headers.get("x-sample-rate", str(transcribe.SR)))
+        channels = int(request.headers.get("x-channels", "1"))
+        length = int(request.headers["content-length"]) if "content-length" in request.headers else None
     except ValueError:
-        raise HTTPException(400, "bad lengths")
+        raise HTTPException(400, "bad lengths or PCM format") from None
+    if rate != transcribe.SR or channels != 1 or (length is not None and length < 0):
+        raise HTTPException(400, "audio must be mono 16000 Hz signed int16 PCM")
     if not lens or len(lens) > 256 or any(n <= 0 or n > MAX_PIECE for n in lens):
         raise HTTPException(400, "bad lengths")
-    if int(request.headers.get("content-length") or 0) > MAX_BODY:
+    expected = 2 * sum(lens)
+    if expected > MAX_BODY or (length is not None and length > MAX_BODY):
         raise HTTPException(413, "too much")
-    body = await request.body()
-    if len(body) != 2 * sum(lens) or len(body) > MAX_BODY:
+    if length is not None and length != expected:
+        raise HTTPException(400, "lengths do not match the audio")
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_BODY:
+            raise HTTPException(413, "too much")
+        if len(body) + len(chunk) > expected:
+            raise HTTPException(400, "lengths do not match the audio")
+        body.extend(chunk)
+    if len(body) != expected:
         raise HTTPException(400, "lengths do not match the audio")
     audio = np.frombuffer(body, dtype="<i2").astype(np.float32) / 32768.0
     pieces, pos = [], 0
@@ -61,16 +80,24 @@ async def decode(request: Request):
     def work():
         t0 = time.time()
         out = []
-        for i in range(0, len(pieces), max(1, CARD_BATCH)):
-            out += transcribe.decode_pieces(pieces[i:i + max(1, CARD_BATCH)])
+        for i in range(0, len(pieces), CARD_BATCH):
+            out += transcribe.decode_pieces(pieces[i:i + CARD_BATCH])
+        if len(out) != len(pieces):
+            raise ValueError("wrong number of recognizer results")
+        out = [transcribe._result(tok, ts, n) for (tok, ts), n in zip(out, lens)]
         with _slock:
             _stats["pieces"] += len(pieces)
-            _stats["audio_s"] += sum(lens) / 16000
+            _stats["audio_s"] += sum(lens) / transcribe.SR
             _stats["busy_s"] += time.time() - t0
         return out
 
     import anyio
-    got = await anyio.to_thread.run_sync(work)
+    try:
+        got = await anyio.to_thread.run_sync(work)
+    except (ValueError, TypeError, KeyError, IndexError):
+        raise HTTPException(502, "invalid recognizer result") from None
+    except Exception:
+        raise HTTPException(503, "speech recognizer unavailable") from None
     return {"pieces": [{"tokens": tok, "timestamps": ts} for tok, ts in got]}
 
 

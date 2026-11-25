@@ -10,6 +10,7 @@ import re
 import shutil
 import threading
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -22,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from . import admin as admins
 from . import account, load
 from . import (accounts, ai, alerts, auth, brain, config, creators, ctx, db, fetch_model, jobs, live, media,
-               profiles, render, safe, states, transcribe, usage, voice)
+               profiles, render, roman, safe, states, transcribe, usage, voice)
 
 from . import tools as _tools  # noqa: E402
 
@@ -47,7 +48,7 @@ CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 
        "frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com")
 
 
-BOOT = f"{int(time.time()) % 100000:x}"     # part of every sync token, so pages reload their data after a restart
+BOOT = uuid.uuid4().hex[:12]     # a restart must never look like a stale revision from the previous process
 
 
 @app.on_event("startup")
@@ -194,7 +195,7 @@ class Gate:
                     # redirects and errors are never kept by a CDN: a "not found" for a clip that is still being
                     # made, or a sign-in redirect, must not be shown to anyone later
                     h.append((b"cache-control", b"private, no-store"))
-                if path.startswith(("/app", "/admin", "/api/", "/auth/", "/reset", "/media/")):
+                if path.startswith(("/app", "/admin", "/api/", "/auth/", "/reset", "/media/", "/editor-media/")):
                     h.append((b"x-robots-tag", b"noindex, nofollow"))
             await send(message)
 
@@ -222,7 +223,7 @@ class Compress:
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "") if scope["type"] == "http" else ""
-        media = path.startswith(("/media/", "/api/upload")) or path.endswith((".mp4", ".jpg", ".png", ".webp", ".ico"))
+        media = path.startswith(("/media/", "/editor-media/", "/api/upload")) or path.endswith((".mp4", ".jpg", ".png", ".webp", ".ico"))
         await (self.plain if scope["type"] != "http" or media else self.gzip)(scope, receive, send)
 
 
@@ -609,7 +610,8 @@ def status(request: Request):
             "tour": not accounts.settings()["tour_done"],
             "max_upload_mb": config.MAX_UPLOAD_MB, "upload_part_mb": config.UPLOAD_PART_MB, "max_batch": config.MAX_ACTIVE_JOBS_PER_USER,
             "styles": {k: v["label"] for k, v in render.STYLES.items()}, "layouts": render.LAYOUTS,
-            "voices": voice.list_voices(), "speech_model_ready": transcribe.model_ready()}
+            "voices": voice.list_voices(), "speech_model_ready": transcribe.model_ready(),
+            "visual": render.visual_catalog()}
 
 
 # ================================================================ videos
@@ -985,7 +987,7 @@ def upload_finish(upid: str):
                     with p.open("rb") as src:
                         shutil.copyfileobj(src, out, 4 * 1024 * 1024)
         except OSError:
-            jobs.delete(job["id"])
+            jobs.delete(job["id"], force=True)
             raise HTTPException(507, "There wasn't room to save this file. Delete some older videos and try again.")
         shutil.rmtree(d, ignore_errors=True)
     _up_forget(upid)
@@ -1007,18 +1009,118 @@ def upload_cancel(upid: str):
 
 @app.post("/api/jobs/{jid}/clips/{cid}/render")
 def rerender(jid: str, cid: str, body: dict = Body(...)):
+    return _render_request(jid, cid, body)
+
+
+def _owned_clip(jid, cid):
     job = _job_or_404(jid)
     clip = next((c for c in job["clips"] if c["id"] == cid), None)
     if not clip:
         raise HTTPException(404, "No such clip")
-    if job["status"] in ("queued", "running") or clip.get("status") in ("queued", "rendering"):
-        raise HTTPException(409, "This clip is still being made. Try again when it has finished.")
+    return job, clip
+
+
+def _render_request(jid, cid, body, preview=False):
+    job, clip = _owned_clip(jid, cid)
+    _quota()
+    if not jobs.has_active_work(job):
+        _job_slots()
     _throttle("render:" + ctx.uid(), 20, 600, "That's a lot of re-makes in a short time. Wait a few minutes.")
     try:
-        jobs.request_render(jid, cid, body)
+        return jobs.request_render(jid, cid, body, preview=preview)
+    except jobs.AttemptConflict as e:
+        raise HTTPException(409, str(e))
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
-    return jobs.public(job)
+    except OSError:
+        raise HTTPException(507, "Could not save the render request. The last saved clip is unchanged.")
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/preview")
+def preview_clip(jid: str, cid: str, body: dict = Body(...)):
+    return _render_request(jid, cid, body, preview=True)
+
+
+@app.get("/api/jobs/{jid}/clips/{cid}/attempts/{aid}")
+def clip_attempt(jid: str, cid: str, aid: str):
+    _owned_clip(jid, cid)
+    attempt = jobs.get_attempt(jid, cid, aid)
+    if not attempt:
+        raise HTTPException(404, "No such attempt")
+    return jobs.public_attempt(attempt)
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/attempts/{aid}/cancel")
+def cancel_clip_attempt(jid: str, cid: str, aid: str):
+    _owned_clip(jid, cid)
+    attempt = jobs.get_attempt(jid, cid, aid)
+    if not attempt:
+        raise HTTPException(404, "No such attempt")
+    jobs.cancel_attempt(jid, cid, aid)
+    return jobs.public_attempt(attempt)
+
+
+def _editor_info(jid, cid, body=None, prepare=False):
+    job, clip = _owned_clip(jid, cid)
+    if prepare:
+        _quota()
+        if not jobs.has_active_work(job):
+            _job_slots()
+        _throttle("editor:" + ctx.uid(), 60, 600)
+    try:
+        return jobs.editor_info(job, clip, body, prepare=prepare)
+    except jobs.AttemptConflict as e:
+        raise HTTPException(409, str(e))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    except OSError:
+        raise HTTPException(507, "Could not save the editor source request. The last saved clip is unchanged.")
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/editor")
+def prepare_clip_editor(jid: str, cid: str, body: dict = Body(default={})):
+    return _editor_info(jid, cid, body, prepare=True)
+
+
+@app.get("/api/jobs/{jid}/clips/{cid}/editor")
+def clip_editor(jid: str, cid: str):
+    return _editor_info(jid, cid)
+
+
+_headline_slots = threading.BoundedSemaphore(2)
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/headline")
+def clip_headline(jid: str, cid: str, body: dict = Body(...)):
+    job, clip = _owned_clip(jid, cid)
+    _throttle("headline:" + ctx.uid(), 240, 60)
+    if not _headline_slots.acquire(blocking=False):
+        raise HTTPException(429, "The headline preview is busy. Try again in a moment.")
+    try:
+        source = jobs.resolve_clip_source(job, clip)
+        settings = jobs._validate_edit(job, clip, body, source)
+        image, metadata = render.headline_preview(roman.to_roman(settings.get("hook") or ""), settings.get("visual"),
+                                                  source["meta"], layout=settings["layout"])
+        import base64
+        return {**metadata, "image": "data:image/png;base64," + base64.b64encode(image).decode("ascii"),
+                "width": metadata["bitmap_width"], "height": metadata["bitmap_height"],
+                "position": metadata["center"], "geometry": render.resolve_visual(settings, source["meta"])}
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    finally:
+        _headline_slots.release()
+
+
+@app.get("/editor-media/{jid}/{token}")
+def editor_media(jid: str, token: str):
+    job = _job_or_404(jid)
+    entry = (job.get("editor_sources") or {}).get(token) if re.fullmatch(r"[a-f0-9]{32}", token) else None
+    if not entry or entry.get("status") != "ready":
+        raise HTTPException(404)
+    path = Path(entry.get("path") or "")
+    if not path.is_file() or not path.resolve().is_relative_to(Path(job["dir"]).resolve()):
+        raise HTTPException(404)
+    return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "private, max-age=300"})
 
 
 @app.get("/api/voice/voices")
@@ -1129,9 +1231,10 @@ def stop_job(jid: str):
 @app.delete("/api/jobs/{jid}")
 def delete_job(jid: str):
     job = _job_or_404(jid)
-    if job["status"] in ("queued", "running", "live") or jid in live.SESSIONS:
+    if jobs.has_active_work(job) or jid in live.SESSIONS:
         raise HTTPException(409, "This is still being worked on. Stop it or wait for it to finish first.")
-    jobs.delete(jid)
+    if not jobs.delete(jid):
+        raise HTTPException(409, "This video began new work. Wait for it to finish first.")
     return {"ok": True}
 
 
@@ -1454,6 +1557,7 @@ def ai_put(request: Request, body: dict = Body(...)):
                       None if k is None or (isinstance(k, str) and not k.strip() and not body.get("remove_key")) else str(k))
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
+    ai.clear_problem()
     usage.forget_all()
     ctx.bump()
     return out
@@ -1476,10 +1580,15 @@ def ai_test(request: Request):
     _admin(request)
     _throttle("aitest:" + ctx.uid(), 20, 600)
     try:
-        return ai.test()
+        res = ai.test()
+        ai.clear_problem()
+        usage.forget_all()
+        return res
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001
+        ai.note_problem(e)
+        usage.forget_all()
         raise HTTPException(502, ai.explain(e) or "The AI did not answer: " + _ai_error(e))
 
 
